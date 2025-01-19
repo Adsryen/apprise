@@ -1,40 +1,50 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import os
 from unittest import mock
-
+from datetime import datetime, timedelta
+from datetime import timezone
 import pytest
 import requests
+from json import loads
 
-from apprise.plugins.NotifyDiscord import NotifyDiscord
+from apprise.plugins.discord import NotifyDiscord
 from helpers import AppriseURLTester
 from apprise import Apprise
 from apprise import AppriseAttachment
 from apprise import NotifyType
 from apprise import NotifyFormat
+from apprise.common import OverflowMode
+
+from random import choice
+from string import ascii_uppercase as str_alpha
+from string import digits as str_num
 
 # Disable logging for a cleaner testing output
 import logging
@@ -79,10 +89,11 @@ apprise_url_tests = (
             'instance': NotifyDiscord,
             'requests_response_code': requests.codes.no_content,
     }),
-    ('discord://%s/%s?format=markdown&footer=Yes&image=Yes' % (
+    ('discord://jack@%s/%s?format=markdown&footer=Yes&image=Yes' % (
         'i' * 24, 't' * 64), {
             'instance': NotifyDiscord,
             'requests_response_code': requests.codes.no_content,
+            'privacy_url': 'discord://jack@i...i/t...t/',
     }),
     ('https://discord.com/api/webhooks/{}/{}'.format(
         '0' * 10, 'B' * 40), {
@@ -103,6 +114,14 @@ apprise_url_tests = (
             # Native URL Support with arguments
             'instance': NotifyDiscord,
             'requests_response_code': requests.codes.no_content,
+            'privacy_url': 'discord://0...0/B...B/',
+    }),
+    ('https://discordapp.com/api/webhooks/{}/{}?footer=yes&botname=joe'.format(
+        '0' * 10, 'B' * 40), {
+            # Native URL Support with arguments
+            'instance': NotifyDiscord,
+            'requests_response_code': requests.codes.no_content,
+            'privacy_url': 'discord://joe@0...0/B...B/',
     }),
     ('discord://%s/%s?format=markdown&avatar=No&footer=No' % (
         'i' * 24, 't' * 64), {
@@ -123,6 +142,18 @@ apprise_url_tests = (
     ('discord://%s/%s?format=text' % ('i' * 24, 't' * 64), {
         'instance': NotifyDiscord,
         'requests_response_code': requests.codes.no_content,
+    }),
+    # Test with href (title link)
+    ('discord://%s/%s?hmarkdown=true&ref=http://localhost' % (
+        'i' * 24, 't' * 64), {
+            'instance': NotifyDiscord,
+            'requests_response_code': requests.codes.no_content,
+    }),
+    # Test with url (title link) - Alias of href
+    ('discord://%s/%s?markdown=true&url=http://localhost' % (
+        'i' * 24, 't' * 64), {
+            'instance': NotifyDiscord,
+            'requests_response_code': requests.codes.no_content,
     }),
     # Test with avatar URL
     ('discord://%s/%s?avatar_url=http://localhost/test.jpg' % (
@@ -169,9 +200,9 @@ def test_plugin_discord_urls():
 
 
 @mock.patch('requests.post')
-def test_plugin_discord_general(mock_post):
+def test_plugin_discord_notifications(mock_post):
     """
-    NotifyDiscord() General Checks
+    NotifyDiscord() Notifications/Ping Support
 
     """
 
@@ -182,6 +213,129 @@ def test_plugin_discord_general(mock_post):
     # Prepare Mock
     mock_post.return_value = requests.Request()
     mock_post.return_value.status_code = requests.codes.ok
+
+    # Test our header parsing when not lead with a header
+    body = """
+    # Heading
+    @everyone and @admin, wake and meet our new user <@123>; <@&456>"
+    """
+
+    results = NotifyDiscord.parse_url(
+        f'discord://{webhook_id}/{webhook_token}/?format=markdown')
+
+    assert isinstance(results, dict)
+    assert results['user'] is None
+    assert results['webhook_id'] == webhook_id
+    assert results['webhook_token'] == webhook_token
+    assert results['password'] is None
+    assert results['port'] is None
+    assert results['host'] == webhook_id
+    assert results['fullpath'] == f'/{webhook_token}/'
+    assert results['path'] == f'/{webhook_token}/'
+    assert results['query'] is None
+    assert results['schema'] == 'discord'
+    assert results['url'] == f'discord://{webhook_id}/{webhook_token}/'
+
+    instance = NotifyDiscord(**results)
+    assert isinstance(instance, NotifyDiscord)
+
+    response = instance.send(body=body)
+    assert response is True
+    assert mock_post.call_count == 1
+
+    details = mock_post.call_args_list[0]
+    assert details[0][0] == \
+        f'https://discord.com/api/webhooks/{webhook_id}/{webhook_token}'
+
+    payload = loads(details[1]['data'])
+
+    assert 'allow_mentions' in payload
+    assert 'users' in payload['allow_mentions']
+    assert len(payload['allow_mentions']['users']) == 1
+    assert '123' in payload['allow_mentions']['users']
+    assert 'roles' in payload['allow_mentions']
+    assert len(payload['allow_mentions']['roles']) == 1
+    assert '456' in payload['allow_mentions']['roles']
+    assert 'parse' in payload['allow_mentions']
+    assert len(payload['allow_mentions']['parse']) == 2
+    assert 'everyone' in payload['allow_mentions']['parse']
+    assert 'admin' in payload['allow_mentions']['parse']
+
+    # Reset our object
+    mock_post.reset_mock()
+
+    results = NotifyDiscord.parse_url(
+        f'discord://{webhook_id}/{webhook_token}/?format=text')
+
+    assert isinstance(results, dict)
+    assert results['user'] is None
+    assert results['webhook_id'] == webhook_id
+    assert results['webhook_token'] == webhook_token
+    assert results['password'] is None
+    assert results['port'] is None
+    assert results['host'] == webhook_id
+    assert results['fullpath'] == f'/{webhook_token}/'
+    assert results['path'] == f'/{webhook_token}/'
+    assert results['query'] is None
+    assert results['schema'] == 'discord'
+    assert results['url'] == f'discord://{webhook_id}/{webhook_token}/'
+
+    instance = NotifyDiscord(**results)
+    assert isinstance(instance, NotifyDiscord)
+
+    response = instance.send(body=body)
+    assert response is True
+    assert mock_post.call_count == 1
+
+    details = mock_post.call_args_list[0]
+    assert details[0][0] == \
+        f'https://discord.com/api/webhooks/{webhook_id}/{webhook_token}'
+
+    payload = loads(details[1]['data'])
+
+    assert 'allow_mentions' in payload
+    assert 'users' in payload['allow_mentions']
+    assert len(payload['allow_mentions']['users']) == 1
+    assert '123' in payload['allow_mentions']['users']
+    assert 'roles' in payload['allow_mentions']
+    assert len(payload['allow_mentions']['roles']) == 1
+    assert '456' in payload['allow_mentions']['roles']
+    assert 'parse' in payload['allow_mentions']
+    assert len(payload['allow_mentions']['parse']) == 2
+    assert 'everyone' in payload['allow_mentions']['parse']
+    assert 'admin' in payload['allow_mentions']['parse']
+
+
+@mock.patch('requests.post')
+@mock.patch('time.sleep')
+def test_plugin_discord_general(mock_sleep, mock_post):
+    """
+    NotifyDiscord() General Checks
+
+    """
+
+    # Prevent throttling
+    mock_sleep.return_value = True
+
+    # Turn off clock skew for local testing
+    NotifyDiscord.clock_skew = timedelta(seconds=0)
+
+    # Epoch time:
+    epoch = datetime.fromtimestamp(0, timezone.utc)
+
+    # Initialize some generic (but valid) tokens
+    webhook_id = 'A' * 24
+    webhook_token = 'B' * 64
+
+    # Prepare Mock
+    mock_post.return_value = requests.Request()
+    mock_post.return_value.status_code = requests.codes.ok
+    mock_post.return_value.content = ''
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds(),
+        'X-RateLimit-Remaining': 1,
+    }
 
     # Invalid webhook id
     with pytest.raises(TypeError):
@@ -201,9 +355,84 @@ def test_plugin_discord_general(mock_post):
         webhook_id=webhook_id,
         webhook_token=webhook_token,
         footer=True, thumbnail=False)
+    assert obj.ratelimit_remaining == 1
 
     # Test that we get a string response
     assert isinstance(obj.url(), str) is True
+
+    # This call includes an image with it's payload:
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    # Force a case where there are no more remaining posts allowed
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds(),
+        'X-RateLimit-Remaining': 0,
+    }
+
+    # This call includes an image with it's payload:
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    # behind the scenes, it should cause us to update our rate limit
+    assert obj.send(body="test") is True
+    assert obj.ratelimit_remaining == 0
+
+    # This should cause us to block
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds(),
+        'X-RateLimit-Remaining': 10,
+    }
+    assert obj.send(body="test") is True
+    assert obj.ratelimit_remaining == 10
+
+    # Reset our variable back to 1
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds(),
+        'X-RateLimit-Remaining': 1,
+    }
+    # Handle cases where our epoch time is wrong
+    del mock_post.return_value.headers['X-RateLimit-Reset']
+    assert obj.send(body="test") is True
+
+    # Return our object, but place it in the future forcing us to block
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds() + 1,
+        'X-RateLimit-Remaining': 0,
+    }
+
+    obj.ratelimit_remaining = 0
+    assert obj.send(body="test") is True
+
+    # Test 429 error response
+    mock_post.return_value.status_code = requests.codes.too_many_requests
+
+    # The below will attempt a second transmission and fail (because we didn't
+    # set up a second post request to pass) :)
+    assert obj.send(body="test") is False
+
+    # Return our object, but place it in the future forcing us to block
+    mock_post.return_value.status_code = requests.codes.ok
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds() - 1,
+        'X-RateLimit-Remaining': 0,
+    }
+    assert obj.send(body="test") is True
+
+    # Return our limits to always work
+    obj.ratelimit_remaining = 1
+
+    # Return our headers to normal
+    mock_post.return_value.headers = {
+        'X-RateLimit-Reset': (
+            datetime.now(timezone.utc) - epoch).total_seconds(),
+        'X-RateLimit-Remaining': 1,
+    }
 
     # This call includes an image with it's payload:
     assert obj.notify(
@@ -361,6 +590,121 @@ def test_plugin_discord_general(mock_post):
     assert a.notify(
         body='body', title='title', notify_type=NotifyType.INFO) is True
 
+    # Create an apprise instance
+    a = Apprise()
+
+    # Reset our object
+    mock_post.reset_mock()
+
+    # Test our threading
+    assert a.add(
+        'discord://{webhook_id}/{webhook_token}/'
+        '?thread=12345'.format(
+            webhook_id=webhook_id,
+            webhook_token=webhook_token)) is True
+
+    # This call includes an image with it's payload:
+    assert a.notify(body='test', title='title') is True
+
+    assert mock_post.call_count == 1
+    response = mock_post.call_args_list[0][1]
+    assert 'params' in response
+    assert response['params'].get('thread_id') == '12345'
+
+
+@mock.patch('requests.post')
+def test_plugin_discord_overflow(mock_post):
+    """
+    NotifyDiscord() Overflow Checks
+
+    """
+
+    # Initialize some generic (but valid) tokens
+    webhook_id = 'A' * 24
+    webhook_token = 'B' * 64
+
+    # Prepare Mock
+    mock_post.return_value = requests.Request()
+    mock_post.return_value.status_code = requests.codes.ok
+
+    # Some variables we use to control the data we work with
+    body_len = 8000
+    title_len = 1024
+
+    # Number of characters per line
+    row = 24
+
+    # Create a large body and title with random data
+    body = ''.join(choice(str_alpha + str_num + ' ') for _ in range(body_len))
+    body = '\r\n'.join([body[i: i + row] for i in range(0, len(body), row)])
+
+    # Create our title using random data
+    title = ''.join(choice(str_alpha + str_num) for _ in range(title_len))
+
+    results = NotifyDiscord.parse_url(
+        f'discord://{webhook_id}/{webhook_token}/?overflow=split')
+
+    assert isinstance(results, dict)
+    assert results['user'] is None
+    assert results['webhook_id'] == webhook_id
+    assert results['webhook_token'] == webhook_token
+    assert results['password'] is None
+    assert results['port'] is None
+    assert results['host'] == webhook_id
+    assert results['fullpath'] == f'/{webhook_token}/'
+    assert results['path'] == f'/{webhook_token}/'
+    assert results['query'] is None
+    assert results['schema'] == 'discord'
+    assert results['url'] == f'discord://{webhook_id}/{webhook_token}/'
+
+    instance = NotifyDiscord(**results)
+    assert isinstance(instance, NotifyDiscord)
+
+    results = instance._apply_overflow(
+        body, title=title, overflow=OverflowMode.SPLIT)
+
+    # Ensure we never exceed 2000 characters
+    for entry in results:
+        assert len(entry['title']) <= instance.title_maxlen
+        assert len(entry['title']) + len(entry['body']) <= instance.body_maxlen
+
+
+@mock.patch('requests.post')
+def test_plugin_discord_markdown_extra(mock_post):
+    """
+    NotifyDiscord() Markdown Extra Checks
+
+    """
+
+    # Initialize some generic (but valid) tokens
+    webhook_id = 'A' * 24
+    webhook_token = 'B' * 64
+
+    # Prepare Mock
+    mock_post.return_value = requests.Request()
+    mock_post.return_value.status_code = requests.codes.ok
+
+    # Reset our apprise object
+    a = Apprise()
+
+    # We want to further test our markdown support to accomodate bug rased on
+    # 2022.10.25; see https://github.com/caronc/apprise/issues/717
+    assert a.add(
+        'discord://{webhook_id}/{webhook_token}/'
+        '?format=markdown&footer=Yes'.format(
+            webhook_id=webhook_id,
+            webhook_token=webhook_token)) is True
+
+    test_markdown = "[green-blue](https://google.com)"
+
+    # This call includes an image with it's payload:
+    assert a.notify(body=test_markdown, title='title',
+                    notify_type=NotifyType.INFO,
+                    body_format=NotifyFormat.TEXT) is True
+
+    assert a.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
 
 @mock.patch('requests.post')
 def test_plugin_discord_attachments(mock_post):
@@ -403,6 +747,26 @@ def test_plugin_discord_attachments(mock_post):
     assert mock_post.call_args_list[1][0][0] == \
         'https://discord.com/api/webhooks/{}/{}'.format(
             webhook_id, webhook_token)
+
+    # Reset our object
+    mock_post.reset_mock()
+
+    # Test notifications with mentions and attachments in it
+    assert obj.notify(
+        body='Say hello to <@1234>!', notify_type=NotifyType.INFO,
+        attach=attach) is True
+
+    # Test our call count
+    assert mock_post.call_count == 2
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://discord.com/api/webhooks/{}/{}'.format(
+            webhook_id, webhook_token)
+    assert mock_post.call_args_list[1][0][0] == \
+        'https://discord.com/api/webhooks/{}/{}'.format(
+            webhook_id, webhook_token)
+
+    # Reset our object
+    mock_post.reset_mock()
 
     # An invalid attachment will cause a failure
     path = os.path.join(TEST_VAR_DIR, '/invalid/path/to/an/invalid/file.jpg')

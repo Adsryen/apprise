@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 # Great Resources:
 # - Dev/Legacy API:
@@ -37,15 +40,15 @@ import pytest
 import requests
 import json
 from apprise import Apprise
-from apprise.plugins.NotifyFCM import NotifyFCM
+from apprise.plugins.fcm import NotifyFCM
 from helpers import AppriseURLTester
 
 try:
-    from apprise.plugins.NotifyFCM.oauth import GoogleOAuth
-    from apprise.plugins.NotifyFCM.common import FCM_MODES
-    from apprise.plugins.NotifyFCM.priority import (
+    from apprise.plugins.fcm.oauth import GoogleOAuth
+    from apprise.plugins.fcm.common import FCM_MODES
+    from apprise.plugins.fcm.priority import (
         FCMPriorityManager, FCM_PRIORITIES)
-    from apprise.plugins.NotifyFCM.color import FCMColorManager
+    from apprise.plugins.fcm.color import FCMColorManager
     from cryptography.exceptions import UnsupportedAlgorithm
 
 except ImportError:
@@ -59,6 +62,8 @@ logging.disable(logging.CRITICAL)
 
 # Test files for KeyFile Directory
 PRIVATE_KEYFILE_DIR = os.path.join(os.path.dirname(__file__), 'var', 'fcm')
+FCM_KEYFILE = os.path.join(PRIVATE_KEYFILE_DIR, 'service_account.json')
+
 
 # Our Testing URLs
 apprise_url_tests = (
@@ -135,13 +140,13 @@ apprise_url_tests = (
         'instance': TypeError,
     }),
     ('fcm://project_id?to=device&keyfile=/invalid/path', {
-        # Test to= and auto detection of oauth mode
+        # Test to= and auto-detection of OAuth mode
         'instance': NotifyFCM,
         # we'll fail to send our notification as a result
         'response': False,
     }),
     ('fcm://?to=device&project=project_id&keyfile=/invalid/path', {
-        # Test project= & to= and auto detection of oauth mode
+        # Test project= & to= and auto detection of OAuth mode
         'instance': NotifyFCM,
         # we'll fail to send our notification as a result
         'response': False,
@@ -152,21 +157,21 @@ apprise_url_tests = (
     }),
     ('fcm://project_id?to=device&mode=oauth2&keyfile=/invalid/path', {
         # Same test as above except we explicitly set our oauth2 mode
-        # Test to= and auto detection of oauth mode
+        # Test to= and auto-detection of OAuth mode
         'instance': NotifyFCM,
         # we'll fail to send our notification as a result
         'response': False,
     }),
     ('fcm://apikey/#topic1/device/?mode=legacy', {
         'instance': NotifyFCM,
-        # throw a bizzare code forcing us to fail to look it up
+        # throw a bizarre code forcing us to fail to look it up
         'response': False,
         'requests_response_code': 999,
     }),
     ('fcm://apikey/#topic1/device/?mode=legacy', {
         'instance': NotifyFCM,
         # Throws a series of connection and transfer exceptions when this flag
-        # is set and tests that we gracfully handle them
+        # is set and tests that we gracefully handle them
         'test_requests_exceptions': True,
     }),
     ('fcm://project/#topic1/device/?mode=oauth2&keyfile=file://{}'.format(
@@ -174,7 +179,7 @@ apprise_url_tests = (
             os.path.dirname(__file__), 'var', 'fcm',
             'service_account.json')), {
                 'instance': NotifyFCM,
-                # throw a bizzare code forcing us to fail to look it up
+                # throw a bizarre code forcing us to fail to look it up
                 'response': False,
                 'requests_response_code': 999,
     }),
@@ -184,10 +189,45 @@ apprise_url_tests = (
             'service_account.json')), {
                 'instance': NotifyFCM,
                 # Throws a series of connection and transfer exceptions when
-                # this flag is set and tests that we gracfully handle them
+                # this flag is set and tests that we gracefully handle them
                 'test_requests_exceptions': True,
     }),
 )
+
+
+@pytest.fixture
+def mock_post(mocker):
+    """
+    Prepare a good OAuth mock response.
+    """
+
+    mock_thing = mocker.patch("requests.post")
+
+    response = mock.Mock()
+    response.content = json.dumps({
+        "access_token": "ya29.c.abcd",
+        "expires_in": 3599,
+        "token_type": "Bearer",
+    })
+    response.status_code = requests.codes.ok
+    mock_thing.return_value = response
+
+    return mock_thing
+
+
+@pytest.fixture
+def mock_post_legacy(mocker):
+    """
+    Prepare a good legacy mock response.
+    """
+
+    mock_thing = mocker.patch("requests.post")
+
+    response = mock.Mock()
+    response.status_code = requests.codes.ok
+    mock_thing.return_value = response
+
+    return mock_thing
 
 
 @pytest.mark.skipif(
@@ -204,19 +244,10 @@ def test_plugin_fcm_urls():
 
 @pytest.mark.skipif(
     'cryptography' not in sys.modules, reason="Requires cryptography")
-@pytest.mark.skipif(
-    hasattr(sys, "pypy_version_info"), reason="Does not work reliably on PyPy")
-@mock.patch('requests.post')
-def test_plugin_fcm_general_legacy(mock_post):
+def test_plugin_fcm_legacy_default(mock_post_legacy):
     """
-    NotifyFCM() General Legacy/APIKey Checks
-
+    NotifyFCM() Legacy/APIKey default checks.
     """
-
-    # Prepare a good response
-    response = mock.Mock()
-    response.status_code = requests.codes.ok
-    mock_post.return_value = response
 
     # A valid Legacy URL
     obj = Apprise.instantiate(
@@ -228,11 +259,11 @@ def test_plugin_fcm_general_legacy(mock_post):
     assert obj.notify("test") is True
 
     # Test our call count
-    assert mock_post.call_count == 1
-    assert mock_post.call_args_list[0][0][0] == \
+    assert mock_post_legacy.call_count == 1
+    assert mock_post_legacy.call_args_list[0][0][0] == \
         'https://fcm.googleapis.com/fcm/send'
 
-    payload = mock_post.mock_calls[0][2]
+    payload = mock_post_legacy.mock_calls[0][2]
     data = json.loads(payload['data'])
     assert 'data' in data
     assert isinstance(data, dict)
@@ -249,23 +280,27 @@ def test_plugin_fcm_general_legacy(mock_post):
     assert data['notification']['notification']['image'] == \
         'https://example.com/interesting.png'
 
-    #
-    # Test priorities
-    #
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_legacy_priorities(mock_post_legacy):
+    """
+    NotifyFCM() Legacy/APIKey priorities checks.
+    """
+
     obj = Apprise.instantiate(
         'fcm://abc123/device/?priority=low')
-    assert mock_post.call_count == 0
+    assert mock_post_legacy.call_count == 0
 
     # Send our notification
     assert obj.notify(title="title", body="body") is True
 
     # Test our call count
-    assert mock_post.call_count == 1
-    assert mock_post.call_args_list[0][0][0] == \
+    assert mock_post_legacy.call_count == 1
+    assert mock_post_legacy.call_args_list[0][0][0] == \
         'https://fcm.googleapis.com/fcm/send'
 
-    payload = mock_post.mock_calls[0][2]
+    payload = mock_post_legacy.mock_calls[0][2]
     data = json.loads(payload['data'])
     assert 'data' not in data
     assert 'notification' in data
@@ -278,23 +313,27 @@ def test_plugin_fcm_general_legacy(mock_post):
     # legacy can only switch between high/low
     assert data['priority'] == "normal"
 
-    #
-    # Test colors
-    #
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_legacy_no_colors(mock_post_legacy):
+    """
+    NotifyFCM() Legacy/APIKey `color=no` checks.
+    """
+
     obj = Apprise.instantiate(
         'fcm://abc123/device/?color=no')
-    assert mock_post.call_count == 0
+    assert mock_post_legacy.call_count == 0
 
     # Send our notification
     assert obj.notify(title="title", body="body") is True
 
     # Test our call count
-    assert mock_post.call_count == 1
-    assert mock_post.call_args_list[0][0][0] == \
+    assert mock_post_legacy.call_count == 1
+    assert mock_post_legacy.call_args_list[0][0][0] == \
         'https://fcm.googleapis.com/fcm/send'
 
-    payload = mock_post.mock_calls[0][2]
+    payload = mock_post_legacy.mock_calls[0][2]
     data = json.loads(payload['data'])
     assert 'data' not in data
     assert 'notification' in data
@@ -304,20 +343,27 @@ def test_plugin_fcm_general_legacy(mock_post):
     assert 'image' not in data['notification']['notification']
     assert 'color' not in data['notification']['notification']
 
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_legacy_colors(mock_post_legacy):
+    """
+    NotifyFCM() Legacy/APIKey colors checks.
+    """
+
     obj = Apprise.instantiate(
         'fcm://abc123/device/?color=AA001b')
-    assert mock_post.call_count == 0
+    assert mock_post_legacy.call_count == 0
 
     # Send our notification
     assert obj.notify(title="title", body="body") is True
 
     # Test our call count
-    assert mock_post.call_count == 1
-    assert mock_post.call_args_list[0][0][0] == \
+    assert mock_post_legacy.call_count == 1
+    assert mock_post_legacy.call_args_list[0][0][0] == \
         'https://fcm.googleapis.com/fcm/send'
 
-    payload = mock_post.mock_calls[0][2]
+    payload = mock_post_legacy.mock_calls[0][2]
     data = json.loads(payload['data'])
     assert 'data' not in data
     assert 'notification' in data
@@ -331,49 +377,14 @@ def test_plugin_fcm_general_legacy(mock_post):
 
 @pytest.mark.skipif(
     'cryptography' not in sys.modules, reason="Requires cryptography")
-@mock.patch('requests.post')
-def test_plugin_fcm_general_oauth(mock_post):
+def test_plugin_fcm_oauth_default(mock_post):
     """
-    NotifyFCM() General OAuth Checks
-
+    NotifyFCM() general OAuth checks - success.
+    Test using a valid Project ID and key file.
     """
 
-    # Valid Keyfile
-    path = os.path.join(PRIVATE_KEYFILE_DIR, 'service_account.json')
-
-    # Prepare a good response
-    response = mock.Mock()
-    response.content = json.dumps({
-        "access_token": "ya29.c.abcd",
-        "expires_in": 3599,
-        "token_type": "Bearer",
-    })
-    response.status_code = requests.codes.ok
-    mock_post.return_value = response
-
-    # Test having a valid keyfile, but not a valid project id match
     obj = Apprise.instantiate(
-        'fcm://invalid_project_id/device/?keyfile={}'.format(str(path)))
-    # we'll fail as a result
-    assert obj.notify("test") is False
-
-    # Test our call count
-    assert mock_post.call_count == 0
-
-    # Now we test using a valid Project ID but we can't open our file
-    obj = Apprise.instantiate(
-        'fcm://mock-project-id/device/?keyfile={}'.format(str(path)))
-
-    with mock.patch('builtins.open', side_effect=OSError):
-        # we'll fail as a result
-        assert obj.notify("test") is False
-
-    # Test our call count
-    assert mock_post.call_count == 0
-
-    # Now we test using a valid Project ID
-    obj = Apprise.instantiate(
-        'fcm://mock-project-id/device/#topic/?keyfile={}'.format(str(path)))
+        f'fcm://mock-project-id/device/#topic/?keyfile={FCM_KEYFILE}')
 
     # send our notification
     assert obj.notify("test") is True
@@ -387,12 +398,56 @@ def test_plugin_fcm_general_oauth(mock_post):
     assert mock_post.call_args_list[2][0][0] == \
         'https://fcm.googleapis.com/v1/projects/mock-project-id/messages:send'
 
-    mock_post.reset_mock()
-    # Now we test using a valid Project ID and data parameters
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_oauth_invalid_project_id(mock_post):
+    """
+    NotifyFCM() OAuth checks, with invalid project id.
+    """
+
+    # Test having a valid keyfile, but not a valid project id match.
     obj = Apprise.instantiate(
-        'fcm://mock-project-id/device/#topic/?keyfile={}'
+        f'fcm://invalid_project_id/device/?keyfile={FCM_KEYFILE}')
+
+    # we'll fail as a result
+    assert obj.notify("test") is False
+
+    # Test our call count
+    assert mock_post.call_count == 0
+
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_oauth_keyfile_error(mock_post):
+    """
+    NotifyFCM() OAuth checks, while unable to read key file.
+    """
+
+    # Now we test using a valid Project ID but we can't open our file
+    obj = Apprise.instantiate(
+        f'fcm://mock-project-id/device/?keyfile={FCM_KEYFILE}')
+
+    with mock.patch('builtins.open', side_effect=OSError):
+        # we'll fail as a result
+        assert obj.notify("test") is False
+
+    # Test our call count
+    assert mock_post.call_count == 0
+
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_oauth_data_parameters(mock_post):
+    """
+    NotifyFCM() OAuth checks, success.
+    Test using a valid Project ID and data parameters.
+    """
+
+    obj = Apprise.instantiate(
+        f'fcm://mock-project-id/device/#topic/?keyfile={FCM_KEYFILE}'
         '&+key=value&+key2=value2'
-        '&image_url=https://example.com/interesting.png'.format(str(path)))
+        '&image_url=https://example.com/interesting.png')
     assert mock_post.call_count == 0
 
     # send our notification
@@ -442,13 +497,17 @@ def test_plugin_fcm_general_oauth(mock_post):
     assert data['message']['notification']['image'] == \
         'https://example.com/interesting.png'
 
-    #
-    # Test priorities
-    #
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_oauth_priorities(mock_post):
+    """
+    Verify priorities work as intended.
+    """
+
     obj = Apprise.instantiate(
-        'fcm://mock-project-id/device/?keyfile={}'
-        '&priority=high'.format(str(path)))
+        f'fcm://mock-project-id/device/?keyfile={FCM_KEYFILE}'
+        '&priority=high')
     assert mock_post.call_count == 0
 
     # Send our notification
@@ -473,13 +532,17 @@ def test_plugin_fcm_general_oauth(mock_post):
     assert data['message']['webpush']['headers']['Urgency'] == "high"
     assert data['message']['android']['priority'] == "HIGH"
 
-    #
-    # Test colors
-    #
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_oauth_no_colors(mock_post):
+    """
+    Verify `color=no` work as intended.
+    """
+
     obj = Apprise.instantiate(
-        'fcm://mock-project-id/device/?keyfile={}'
-        '&color=no'.format(str(path)))
+        f'fcm://mock-project-id/device/?keyfile={FCM_KEYFILE}'
+        '&color=no')
     assert mock_post.call_count == 0
 
     # Send our notification
@@ -501,10 +564,17 @@ def test_plugin_fcm_general_oauth(mock_post):
     assert isinstance(data['message']['notification'], dict)
     assert 'color' not in data['message']['notification']
 
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_oauth_colors(mock_post):
+    """
+    Verify colors work as intended.
+    """
+
     obj = Apprise.instantiate(
-        'fcm://mock-project-id/device/?keyfile={}'
-        '&color=#12AAbb'.format(str(path)))
+        f'fcm://mock-project-id/device/?keyfile={FCM_KEYFILE}'
+        '&color=#12AAbb')
     assert mock_post.call_count == 0
 
     # Send our notification
@@ -530,29 +600,17 @@ def test_plugin_fcm_general_oauth(mock_post):
 
 @pytest.mark.skipif(
     'cryptography' not in sys.modules, reason="Requires cryptography")
-@mock.patch('requests.post')
-def test_plugin_fcm_keyfile_parse(mock_post):
+def test_plugin_fcm_keyfile_parse_default(mock_post):
     """
     NotifyFCM() KeyFile Tests
     """
 
-    # Prepare a good response
-    response = mock.Mock()
-    response.content = json.dumps({
-        "access_token": "ya29.c.abcd",
-        "expires_in": 3599,
-        "token_type": "Bearer",
-    })
-    response.status_code = requests.codes.ok
-    mock_post.return_value = response
-
-    path = os.path.join(PRIVATE_KEYFILE_DIR, 'service_account.json')
     oauth = GoogleOAuth()
     # We can not get an Access Token without content loaded
     assert oauth.access_token is None
 
     # Load our content
-    assert oauth.load(path) is True
+    assert oauth.load(FCM_KEYFILE) is True
     assert oauth.access_token is not None
 
     # Test our call count
@@ -561,19 +619,26 @@ def test_plugin_fcm_keyfile_parse(mock_post):
         'https://accounts.google.com/o/oauth2/token'
 
     mock_post.reset_mock()
+
     # a second call uses cache since our token hasn't expired yet
     assert oauth.access_token is not None
     assert mock_post.call_count == 0
 
-    # Same test case without expires_in entry
-    mock_post.reset_mock()
-    response.content = json.dumps({
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_keyfile_parse_no_expiry(mock_post):
+    """
+    Test case without `expires_in` entry.
+    """
+
+    mock_post.return_value.content = json.dumps({
         "access_token": "ya29.c.abcd",
         "token_type": "Bearer",
     })
 
     oauth = GoogleOAuth()
-    assert oauth.load(path) is True
+    assert oauth.load(FCM_KEYFILE) is True
     assert oauth.access_token is not None
 
     # Test our call count
@@ -581,35 +646,42 @@ def test_plugin_fcm_keyfile_parse(mock_post):
     assert mock_post.call_args_list[0][0][0] == \
         'https://accounts.google.com/o/oauth2/token'
 
-    # Test user-agent override
-    mock_post.reset_mock()
+
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_keyfile_parse_user_agent(mock_post):
+    """
+    Test case with `user-agent` override.
+    """
+
     oauth = GoogleOAuth(user_agent="test-agent-override")
-    assert oauth.load(path) is True
+    assert oauth.load(FCM_KEYFILE) is True
     assert oauth.access_token is not None
     assert mock_post.call_count == 1
     assert mock_post.call_args_list[0][0][0] == \
         'https://accounts.google.com/o/oauth2/token'
 
-    #
-    # Test some errors that can get thrown when trying to handle
-    # the service_account.json file
-    #
 
-    # Reset our object
-    mock_post.reset_mock()
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_keyfile_parse_keyfile_failures(mock_post: mock.Mock):
+    """
+    Test some errors that can get thrown when trying to handle
+    the `service_account.json` file.
+    """
 
     # Now we test a case where we can't access the file we've been pointed to:
     oauth = GoogleOAuth()
     with mock.patch('builtins.open', side_effect=OSError):
         # We will fail to retrieve our Access Token
-        assert oauth.load(path) is False
+        assert oauth.load(FCM_KEYFILE) is False
         assert oauth.access_token is None
 
     oauth = GoogleOAuth()
     with mock.patch('json.loads', side_effect=([], )):
         # We will fail to retrieve our Access Token since we did not parse
         # a dictionary
-        assert oauth.load(path) is False
+        assert oauth.load(FCM_KEYFILE) is False
         assert oauth.access_token is None
 
     # Case where we can't load the PEM key:
@@ -618,7 +690,7 @@ def test_plugin_fcm_keyfile_parse(mock_post):
             'cryptography.hazmat.primitives.serialization'
             '.load_pem_private_key',
             side_effect=ValueError("")):
-        assert oauth.load(path) is False
+        assert oauth.load(FCM_KEYFILE) is False
         assert oauth.access_token is None
 
     # Case where we can't load the PEM key:
@@ -627,7 +699,7 @@ def test_plugin_fcm_keyfile_parse(mock_post):
             'cryptography.hazmat.primitives.serialization'
             '.load_pem_private_key',
             side_effect=TypeError("")):
-        assert oauth.load(path) is False
+        assert oauth.load(FCM_KEYFILE) is False
         assert oauth.access_token is None
 
     # Case where we can't load the PEM key:
@@ -637,27 +709,31 @@ def test_plugin_fcm_keyfile_parse(mock_post):
             '.load_pem_private_key',
             side_effect=UnsupportedAlgorithm("")):
         # Note: This test should be te
-        assert oauth.load(path) is False
+        assert oauth.load(FCM_KEYFILE) is False
         assert oauth.access_token is None
 
-    # Not one call was made to the web
-    assert mock_post.call_count == 0
+    # Verify that not a single call to the web escaped the test harness.
+    assert mock_post.mock_calls == []
 
-    #
-    # Test some web errors that can occur when speaking upstream
-    # with Google to get our token generated
-    #
-    response.status_code = requests.codes.internal_server_error
 
-    mock_post.reset_mock()
+@pytest.mark.skipif(
+    'cryptography' not in sys.modules, reason="Requires cryptography")
+def test_plugin_fcm_keyfile_parse_token_failures(mock_post):
+    """
+    Test some web errors that can occur when speaking upstream
+    with Google to get our token generated.
+    """
+
+    mock_post.return_value.status_code = requests.codes.internal_server_error
+
     oauth = GoogleOAuth()
-    assert oauth.load(path) is True
+    assert oauth.load(FCM_KEYFILE) is True
 
     # We'll fail due to an bad web response
     assert oauth.access_token is None
 
     # Return our status code to how it was
-    response.status_code = requests.codes.ok
+    mock_post.return_value.status_code = requests.codes.ok
 
     # No access token
     bad_response_1 = mock.Mock()
@@ -678,7 +754,7 @@ def test_plugin_fcm_keyfile_parse(mock_post):
 
         # Test all of our bad side effects
         oauth = GoogleOAuth()
-        assert oauth.load(path) is True
+        assert oauth.load(FCM_KEYFILE) is True
 
         # We'll fail due to an bad web response
         assert oauth.access_token is None
@@ -738,7 +814,7 @@ def test_plugin_fcm_keyfile_missing_entries_parse(tmpdir):
 
 @pytest.mark.skipif(
     'cryptography' not in sys.modules, reason="Requires cryptography")
-def test_plugin_fcm_priorities():
+def test_plugin_fcm_priority_manager():
     """
     NotifyFCM() FCMPriorityManager() Testing
     """
@@ -773,7 +849,7 @@ def test_plugin_fcm_priorities():
 
 @pytest.mark.skipif(
     'cryptography' not in sys.modules, reason="Requires cryptography")
-def test_plugin_fcm_colors():
+def test_plugin_fcm_color_manager():
     """
     NotifyFCM() FCMColorManager() Testing
     """
@@ -797,13 +873,13 @@ def test_plugin_fcm_colors():
 
     # We will be `true` because we can acquire a color based on what was
     # passed in
-    assert bool(instance) is True
+    assert bool(instance)
 
     # Custom color
     instance = FCMColorManager('#A2B3A4')
     assert isinstance(instance.get(), str)
     assert instance.get() == '#a2b3a4'
-    assert bool(instance) is True
+    assert bool(instance)
     # str() response does not include hashtag
     assert str(instance) == 'a2b3a4'
 
@@ -812,7 +888,7 @@ def test_plugin_fcm_colors():
     assert isinstance(instance.get(), str)
     # Hashtag is always part of output
     assert instance.get() == '#a2b3a4'
-    assert bool(instance) is True
+    assert bool(instance)
     # str() response does not include hashtag
     assert str(instance) == 'a2b3a4'
 
@@ -821,7 +897,7 @@ def test_plugin_fcm_colors():
     assert isinstance(instance.get(), str)
     # Hashtag is always part of output
     assert instance.get() == '#aacc44'
-    assert bool(instance) is True
+    assert bool(instance)
     # str() response does not include hashtag
     assert str(instance) == 'aacc44'
 

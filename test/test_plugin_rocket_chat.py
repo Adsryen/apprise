@@ -1,31 +1,35 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
 import pytest
 import requests
 from apprise import NotifyType
-from apprise.plugins.NotifyRocketChat import NotifyRocketChat
+from apprise.plugins.rocketchat import NotifyRocketChat
 from helpers import AppriseURLTester
 from unittest import mock
 
@@ -75,6 +79,7 @@ apprise_url_tests = (
                 'userId': 'user',
             },
         },
+        'privacy_url': 'rocket://user:****@localhost',
     }),
     # A channel (using the to=)
     ('rockets://user:pass@localhost?to=#channel', {
@@ -87,6 +92,7 @@ apprise_url_tests = (
                 'userId': 'user',
             },
         },
+        'privacy_url': 'rockets://user:****@localhost',
     }),
     # A channel
     ('rockets://user:pass@localhost/#channel', {
@@ -99,6 +105,17 @@ apprise_url_tests = (
                 'userId': 'user',
             },
         },
+        'privacy_url': 'rockets://user:****@localhost',
+    }),
+    # A channel using token based
+    ('rockets://user:token@localhost/#channel?mode=token', {
+        'instance': NotifyRocketChat,
+        'privacy_url': 'rockets://user:****@localhost',
+    }),
+    # Token is detected based o it's length
+    ('rockets://user:{}@localhost/#channel'.format('t' * 40), {
+        'instance': NotifyRocketChat,
+        'privacy_url': 'rockets://user:****@localhost',
     }),
     # Several channels
     ('rocket://user:pass@localhost/#channel1/#channel2/?avatar=Yes', {
@@ -111,6 +128,7 @@ apprise_url_tests = (
                 'userId': 'user',
             },
         },
+        'privacy_url': 'rocket://user:****@localhost',
     }),
     # Several Rooms
     ('rocket://user:pass@localhost/room1/room2', {
@@ -123,6 +141,7 @@ apprise_url_tests = (
                 'userId': 'user',
             },
         },
+        'privacy_url': 'rocket://user:****@localhost',
     }),
     # A room and channel
     ('rocket://user:pass@localhost/room/#channel?mode=basic&avatar=Yes', {
@@ -151,6 +170,7 @@ apprise_url_tests = (
                 'userId': 'user',
             },
         },
+        'privacy_url': 'rockets://user:****@localhost',
     }),
     # A room and channel
     ('rockets://user:pass@localhost/rooma/#channela', {
@@ -168,9 +188,11 @@ apprise_url_tests = (
     # A web token
     ('rockets://web/token@localhost/@user/#channel/roomid', {
         'instance': NotifyRocketChat,
+        'privacy_url': 'rockets://****@localhost/#channel/roomid',
     }),
     ('rockets://user:web/token@localhost/@user/?mode=webhook', {
         'instance': NotifyRocketChat,
+        'privacy_url': 'rockets://user:****@localhost',
     }),
     ('rockets://user:web/token@localhost?to=@user2,#channel2', {
         'instance': NotifyRocketChat,
@@ -180,10 +202,11 @@ apprise_url_tests = (
         'instance': NotifyRocketChat,
 
         # Our expected url(privacy=True) startswith() response:
-        'privacy_url': 'rockets://w...n@localhost',
+        'privacy_url': 'rockets://****@localhost/',
     }),
     ('rockets://localhost/@user/?mode=webhook&webhook=web/token', {
         'instance': NotifyRocketChat,
+        'privacy_url': 'rockets://****@localhost/@user'
     }),
     ('rockets://user:web/token@localhost/@user/?mode=invalid', {
         # invalid mode
@@ -228,7 +251,7 @@ def test_plugin_rocket_chat_urls():
 
 @mock.patch('requests.get')
 @mock.patch('requests.post')
-def test_plugin_rocketchat_edge_cases(mock_post, mock_get):
+def test_plugin_rocket_chat_edge_cases(mock_post, mock_get):
     """
     NotifyRocketChat() Edge Cases
 

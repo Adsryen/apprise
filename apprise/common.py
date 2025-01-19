@@ -1,72 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-
-# we mirror our base purely for the ability to reset everything; this
-# is generally only used in testing and should not be used by developers
-# It is also used as a means of preventing a module from being reloaded
-# in the event it already exists
-NOTIFY_MODULE_MAP = {}
-
-# Maintains a mapping of all of the Notification services
-NOTIFY_SCHEMA_MAP = {}
-
-# This contains a mapping of all plugins dynamicaly loaded at runtime from
-# external modules such as the @notify decorator
-#
-# The elements here will be additionally added to the NOTIFY_SCHEMA_MAP if
-# there is no conflict otherwise.
-# The structure looks like the following:
-# Module path, e.g. /usr/share/apprise/plugins/my_notify_hook.py
-# {
-#   'path': path,
-#
-#   'notify': {
-#     'schema': {
-#       'name': 'Custom schema name',
-#       'fn_name': 'name_of_function_decorator_was_found_on',
-#       'url': 'schema://any/additional/info/found/on/url'
-#       'plugin': <CustomNotifyWrapperPlugin>
-#    },
-#     'schema2': {
-#       'name': 'Custom schema name',
-#       'fn_name': 'name_of_function_decorator_was_found_on',
-#       'url': 'schema://any/additional/info/found/on/url'
-#       'plugin': <CustomNotifyWrapperPlugin>
-#    }
-#  }
-#
-# Note: that the <CustomNotifyWrapperPlugin> inherits from
-#       NotifyBase
-NOTIFY_CUSTOM_MODULE_MAP = {}
-
-# Maintains a mapping of all configuration schema's supported
-CONFIG_SCHEMA_MAP = {}
-
-# Maintains a mapping of all attachment schema's supported
-ATTACHMENT_SCHEMA_MAP = {}
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 
 class NotifyType:
@@ -228,6 +186,42 @@ CONTENT_LOCATIONS = (
     ContentLocation.HOSTED,
     ContentLocation.INACCESSIBLE,
 )
+
+
+class PersistentStoreMode:
+    # Allow persistent storage; write on demand
+    AUTO = 'auto'
+
+    # Always flush every change to disk after it's saved. This has higher i/o
+    # but enforces disk reflects what was set immediately
+    FLUSH = 'flush'
+
+    # memory based store only
+    MEMORY = 'memory'
+
+
+PERSISTENT_STORE_MODES = (
+    PersistentStoreMode.AUTO,
+    PersistentStoreMode.FLUSH,
+    PersistentStoreMode.MEMORY,
+)
+
+
+class PersistentStoreState:
+    """
+    Defines the persistent states describing what has been cached
+    """
+    # Persistent Directory is actively cross-referenced against a matching URL
+    ACTIVE = 'active'
+
+    # Persistent Directory is no longer being used or has no cross-reference
+    STALE = 'stale'
+
+    # Persistent Directory is not utilizing any disk space at all, however
+    # it potentially could if the plugin it successfully cross-references
+    # is utilized
+    UNUSED = 'unused'
+
 
 # This is a reserved tag that is automatically assigned to every
 # Notification Plugin

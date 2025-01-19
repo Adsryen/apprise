@@ -1,27 +1,32 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2022 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import re
 import os
 import json
 from unittest import mock
@@ -30,7 +35,7 @@ import requests
 import apprise
 from helpers import AppriseURLTester
 
-from apprise.plugins.NotifyNtfy import NtfyPriority, NotifyNtfy
+from apprise.plugins.ntfy import NtfyPriority, NotifyNtfy
 
 # Disable logging for a cleaner testing output
 import logging
@@ -91,6 +96,8 @@ apprise_url_tests = (
     ('ntfy://user@localhost/topic/', {
         'instance': NotifyNtfy,
         'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://user@localhost/topic',
     }),
     # Ntfy cloud mode (enforced)
     ('ntfy://ntfy.sh/topic1/topic2/', {
@@ -132,6 +139,16 @@ apprise_url_tests = (
         'instance': NotifyNtfy,
         'requests_response_text': GOOD_RESPONSE_TEXT,
     }),
+    # No images
+    ('ntfy://localhost/topic1/?image=False', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+    }),
+    # Over-ride Image Path
+    ('ntfy://localhost/topic1/?avatar_url=ttp://localhost/test.jpg', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+    }),
     # Attach
     ('ntfy://localhost/topic1/?attach=http://example.com/file.jpg', {
         'instance': NotifyNtfy,
@@ -147,10 +164,55 @@ apprise_url_tests = (
         'instance': NotifyNtfy,
         'requests_response_text': GOOD_RESPONSE_TEXT,
     }),
+    # Auth Token Types (tk_ gets detected as a auth=token)
+    ('ntfy://tk_abcd123456@localhost/topic1', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://t...6@localhost/topic1',
+    }),
+    # Force an auth token since lack of tk_ prevents auto-detection
+    ('ntfy://abcd123456@localhost/topic1?auth=token', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://a...6@localhost/topic1',
+    }),
+    # Force an auth token since lack of tk_ prevents auto-detection
+    ('ntfy://:abcd123456@localhost/topic1?auth=token', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://a...6@localhost/topic1',
+    }),
+    # Token detection already implied when token keyword is set
+    ('ntfy://localhost/topic1?token=abc1234', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://a...4@localhost/topic1',
+    }),
+    # Token enforced, but since a user/pass provided, only the pass is kept
+    ('ntfy://user:token@localhost/topic1?auth=token', {
+        'instance': NotifyNtfy,
+        'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://t...n@localhost/topic1',
+    }),
+    # Token mode force, but there was no token provided
+    ('ntfy://localhost/topic1?auth=token', {
+        'instance': NotifyNtfy,
+        # We'll out-right fail to send the notification
+        'response': False,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://localhost/topic1',
+    }),
     # Priority
     ('ntfy://localhost/topic1/?priority=default', {
         'instance': NotifyNtfy,
         'requests_response_text': GOOD_RESPONSE_TEXT,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'ntfy://localhost/topic1',
     }),
     # Priority higher
     ('ntfy://localhost/topic1/?priority=high', {
@@ -193,6 +255,10 @@ apprise_url_tests = (
     }),
     ('ntfys://user:web/token@localhost/topic/?mode=invalid', {
         # Invalid mode
+        'instance': TypeError,
+    }),
+    ('ntfys://token@localhost/topic/?auth=invalid', {
+        # Invalid Authentication type
         'instance': TypeError,
     }),
     # Invalid hostname on localhost/private mode
@@ -422,6 +488,22 @@ def test_plugin_custom_ntfy_edge_cases(mock_post):
     assert response['attach'] == 'http://example.com/file.jpg'
     assert response['filename'] == 'smoke.jpg'
 
+    # Reset our mock object
+    mock_post.reset_mock()
+
+    # Markdown Support
+    results = NotifyNtfy.parse_url('ntfys://topic/?format=markdown')
+    assert isinstance(results, dict)
+    instance = NotifyNtfy(**results)
+
+    assert instance.notify(
+        body='body', title='title',
+        notify_type=apprise.NotifyType.INFO) is True
+
+    assert mock_post.call_count == 1
+    assert mock_post.call_args_list[0][0][0] == 'https://ntfy.sh'
+    assert 'X-Markdown' in mock_post.call_args_list[0][1]['headers']
+
 
 @mock.patch('requests.post')
 @mock.patch('requests.get')
@@ -490,3 +572,56 @@ def test_plugin_ntfy_config_files(mock_post, mock_get):
     assert len([x for x in aobj.find(tag='ntfy_invalid')]) == 1
     assert next(aobj.find(tag='ntfy_invalid')).priority == \
         NtfyPriority.NORMAL
+
+    # A cloud reference without any identifiers; the ntfy:// (insecure mode)
+    # is not considered during the id generation as ntfys:// is always
+    # implied
+    results = NotifyNtfy.parse_url('ntfy://')
+    obj = NotifyNtfy(**results)
+    new_results = NotifyNtfy.parse_url(obj.url())
+    obj2 = NotifyNtfy(**new_results)
+    assert obj.url_id() == obj2.url_id()
+
+
+@mock.patch('requests.post')
+def test_plugin_ntfy_message_to_attach(mock_post):
+    """
+    NotifyNtfy() large messages converted into attachments
+
+    """
+
+    # Prepare Mock return object
+    response = mock.Mock()
+    response.content = GOOD_RESPONSE_TEXT
+    response.status_code = requests.codes.ok
+    mock_post.return_value = response
+
+    # Create a very, very big message
+    title = 'My Title'
+    body = 'b' * NotifyNtfy.ntfy_json_upstream_size_limit
+
+    for fmt in apprise.NOTIFY_FORMATS:
+
+        # Prepare our object
+        obj = apprise.Apprise.instantiate(
+            'ntfy://user:pass@localhost:8080/topic?format={}'.format(fmt))
+
+        # Our content will actually transfer as an attachment
+        assert obj.notify(title=title, body=body)
+        assert mock_post.call_count == 1
+
+        assert mock_post.call_args_list[0][0][0] == \
+            'http://localhost:8080/topic'
+
+        response = mock_post.call_args_list[0][1]
+        assert 'data' in response
+        assert response['data'].decode('utf-8').startswith(title)
+        assert response['data'].decode('utf-8').endswith(body)
+        assert 'params' in response
+        assert 'filename' in response['params']
+        # Our filename is automatically generated (with .txt)
+        assert re.match(
+            r'^[a-z0-9-]+\.txt$', response['params']['filename'], re.I)
+
+        # Reset our mock object
+        mock_post.reset_mock()

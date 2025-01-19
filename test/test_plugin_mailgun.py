@@ -1,34 +1,37 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import os
 from unittest import mock
 
 import requests
 
-from apprise.plugins.NotifyMailgun import NotifyMailgun
+from apprise.plugins.mailgun import NotifyMailgun
 from helpers import AppriseURLTester
 from apprise import Apprise
 from apprise import AppriseAttachment
@@ -95,6 +98,12 @@ apprise_url_tests = (
         'a' * 32, 'b' * 8, 'c' * 8), {
             'instance': TypeError,
     }),
+    # Use of both 'name' and 'from' together; these are synonymous
+    ('mailgun://user@localhost.localdomain/{}-{}-{}?'
+     'from=jack@gmail.com&name=Jason<jason@gmail.com>'.format(
+         'a' * 32, 'b' * 8, 'c' * 8), {
+             'instance': NotifyMailgun}),
+
     # headers
     ('mailgun://user@localhost.localdomain/{}-{}-{}'
         '?+X-Customer-Campaign-ID=Apprise'.format(
@@ -104,6 +113,12 @@ apprise_url_tests = (
     # template tokens
     ('mailgun://user@localhost.localdomain/{}-{}-{}'
         '?:name=Chris&:status=admin'.format(
+            'a' * 32, 'b' * 8, 'c' * 8), {
+                'instance': NotifyMailgun,
+        }),
+    # We can use the `from=` directive as well:
+    ('mailgun://user@localhost.localdomain/{}-{}-{}'
+        '?:from=Chris&:status=admin'.format(
             'a' * 32, 'b' * 8, 'c' * 8), {
                 'instance': NotifyMailgun,
         }),
@@ -269,9 +284,15 @@ def test_plugin_mailgun_attachments(mock_post):
         'user1@example.com/user2@example.com?batch=yes'.format(apikey))
     assert isinstance(obj, NotifyMailgun)
 
+    # objects will be combined into a single post in batch mode
+    assert len(obj) == 1
+
     # Force our batch to break into separate messages
     obj.default_batch_size = 1
-    # We'll send 2 messages
+
+    # We'll send 2 messages now
+    assert len(obj) == 2
+
     mock_post.reset_mock()
 
     assert obj.notify(
@@ -288,3 +309,113 @@ def test_plugin_mailgun_attachments(mock_post):
         body='body', title='title', notify_type=NotifyType.INFO,
         attach=attach) is True
     assert mock_post.call_count == 1
+
+
+@mock.patch('requests.post')
+def test_plugin_mailgun_header_check(mock_post):
+    """
+    NotifyMailgun() Test Header Prep
+
+    """
+
+    okay_response = requests.Request()
+    okay_response.status_code = requests.codes.ok
+    okay_response.content = ""
+
+    # Assign our mock object our return value
+    mock_post.return_value = okay_response
+
+    # API Key
+    apikey = 'abc123'
+
+    obj = Apprise.instantiate(
+        'mailgun://user@localhost.localdomain/{}'.format(apikey))
+    assert isinstance(obj, NotifyMailgun)
+    assert isinstance(obj.url(), str)
+
+    # No calls made yet
+    assert mock_post.call_count == 0
+
+    # Send our notification
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    # 2 calls were made, one to perform an email lookup, the second
+    # was the notification itself
+    assert mock_post.call_count == 1
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://api.mailgun.net/v3/localhost.localdomain/messages'
+
+    payload = mock_post.call_args_list[0][1]['data']
+    assert 'from' in payload
+    assert 'Apprise <user@localhost.localdomain>' == payload['from']
+    assert 'user@localhost.localdomain' == payload['to']
+
+    # Reset our mock object
+    mock_post.reset_mock()
+
+    obj = Apprise.instantiate(
+        'mailgun://user@localhost.localdomain/'
+        '{}?from=Luke%20Skywalker'.format(apikey))
+    assert isinstance(obj, NotifyMailgun)
+    assert isinstance(obj.url(), str)
+
+    # No calls made yet
+    assert mock_post.call_count == 0
+
+    # Send our notification
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    assert mock_post.call_count == 1
+    payload = mock_post.call_args_list[0][1]['data']
+    assert 'from' in payload
+    assert 'to' in payload
+    assert 'Luke Skywalker <user@localhost.localdomain>' == payload['from']
+    assert 'user@localhost.localdomain' == payload['to']
+
+    # Reset our mock object
+    mock_post.reset_mock()
+
+    obj = Apprise.instantiate(
+        'mailgun://user@localhost.localdomain/{}'
+        '?from=Luke%20Skywalker<luke@rebels.com>'.format(apikey))
+    assert isinstance(obj, NotifyMailgun)
+    assert isinstance(obj.url(), str)
+
+    # No calls made yet
+    assert mock_post.call_count == 0
+
+    # Send our notification
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    assert mock_post.call_count == 1
+    payload = mock_post.call_args_list[0][1]['data']
+    assert 'from' in payload
+    assert 'to' in payload
+    assert 'Luke Skywalker <luke@rebels.com>' == payload['from']
+    assert 'luke@rebels.com' == payload['to']
+
+    # Reset our mock object
+    mock_post.reset_mock()
+
+    obj = Apprise.instantiate(
+        'mailgun://user@localhost.localdomain/{}'
+        '?from=luke@rebels.com'.format(apikey))
+    assert isinstance(obj, NotifyMailgun)
+    assert isinstance(obj.url(), str)
+
+    # No calls made yet
+    assert mock_post.call_count == 0
+
+    # Send our notification
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    assert mock_post.call_count == 1
+    payload = mock_post.call_args_list[0][1]['data']
+    assert 'from' in payload
+    assert 'to' in payload
+    assert 'luke@rebels.com' == payload['from']
+    assert 'luke@rebels.com' == payload['to']

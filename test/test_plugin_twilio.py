@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 from unittest import mock
 
@@ -29,7 +32,7 @@ import requests
 import pytest
 from json import dumps
 from apprise import Apprise
-from apprise.plugins.NotifyTwilio import NotifyTwilio
+from apprise.plugins.twilio import NotifyTwilio
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -66,8 +69,8 @@ apprise_url_tests = (
         # sid and token provided and from but invalid from no
         'instance': TypeError,
     }),
-    ('twilio://AC{}:{}@{}/123/{}/abcd/'.format(
-        'a' * 32, 'b' * 32, '3' * 11, '9' * 15), {
+    ('twilio://AC{}:{}@{}/123/{}/abcd/w:{}'.format(
+        'a' * 32, 'b' * 32, '3' * 11, '9' * 15, 8 * 11), {
         # valid everything but target numbers
         'instance': NotifyTwilio,
     }),
@@ -77,6 +80,20 @@ apprise_url_tests = (
 
         # Our expected url(privacy=True) startswith() response:
         'privacy_url': 'twilio://...aaaa:b...b@12345',
+    }),
+    ('twilio://AC{}:{}@98765/{}/w:{}/'.format(
+        'a' * 32, 'b' * 32, '4' * 11, '5' * 11), {
+            # using short-code (5 characters) and 1 twillio address ignored
+            # because source phone number can not be a short code
+            'instance': NotifyTwilio,
+
+            # Our expected url(privacy=True) startswith() response:
+            'privacy_url': 'twilio://...aaaa:b...b@98765',
+    }),
+    ('twilio://AC{}:{}@w:12345/{}/{}'.format(
+        'a' * 32, 'b' * 32, '4' * 11, '5' * 11), {
+            # Invalid short-code
+            'instance': TypeError,
     }),
     ('twilio://AC{}:{}@123456/{}'.format('a' * 32, 'b' * 32, '4' * 11), {
         # using short-code (6 characters)
@@ -90,6 +107,11 @@ apprise_url_tests = (
     ('twilio://_?sid=AC{}&token={}&from={}'.format(
         'a' * 32, 'b' * 32, '5' * 11), {
         # use get args to acomplish the same thing
+        'instance': NotifyTwilio,
+    }),
+    ('twilio://_?sid=AC{}&token={}&from={}&to=w:{}'.format(
+        'a' * 32, 'b' * 32, '5' * 11, '6' * 11), {
+        # Support whatsapp (w: before number)
         'instance': NotifyTwilio,
     }),
     ('twilio://_?sid=AC{}&token={}&source={}'.format(
@@ -155,8 +177,8 @@ def test_plugin_twilio_auth(mock_post):
     obj = Apprise.instantiate(
         'twilio://{}:{}@{}/{}'
         .format(account_sid, auth_token, source, dest))
-    assert isinstance(obj, NotifyTwilio) is True
-    assert isinstance(obj.url(), str) is True
+    assert isinstance(obj, NotifyTwilio)
+    assert isinstance(obj.url(), str)
 
     # Send Notification
     assert obj.send(body=message_contents) is True
@@ -165,8 +187,8 @@ def test_plugin_twilio_auth(mock_post):
     obj = Apprise.instantiate(
         'twilio://{}:{}@{}/{}?apikey={}'
         .format(account_sid, auth_token, source, dest, apikey))
-    assert isinstance(obj, NotifyTwilio) is True
-    assert isinstance(obj.url(), str) is True
+    assert isinstance(obj, NotifyTwilio)
+    assert isinstance(obj.url(), str)
 
     # Send Notification
     assert obj.send(body=message_contents) is True
@@ -224,6 +246,11 @@ def test_plugin_twilio_edge_cases(mock_post):
     with pytest.raises(TypeError):
         NotifyTwilio(
             account_sid=account_sid, auth_token=None, source=source)
+
+    # Source is bad
+    with pytest.raises(TypeError):
+        NotifyTwilio(
+            account_sid=account_sid, auth_token=auth_token, source='')
 
     # a error response
     response.status_code = 400

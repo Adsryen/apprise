@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import logging
 import re
@@ -32,7 +35,7 @@ from unittest.mock import call, Mock, ANY
 import pytest
 
 import apprise
-from apprise.plugins.NotifyMQTT import NotifyMQTT
+from apprise.plugins.mqtt import NotifyMQTT
 
 # Disable logging for a cleaner testing output
 logging.disable(logging.CRITICAL)
@@ -45,7 +48,7 @@ def mqtt_client_mock(mocker):
     """
 
     if "paho" not in sys.modules:
-        raise pytest.skip(reason="Requires that `paho-mqtt` is installed")
+        raise pytest.skip("Requires that `paho-mqtt` is installed")
 
     # Establish mock of the `publish()` response object.
     publish_result = Mock(**{
@@ -89,7 +92,12 @@ def test_plugin_mqtt_default_success(mqtt_client_mock):
     obj = apprise.Apprise.instantiate(
         'mqtt://localhost:1234/my/topic', suppress_exceptions=False)
     assert isinstance(obj, NotifyMQTT)
+    # We only loaded 1 topic
+    assert len(obj) == 1
     assert obj.url().startswith('mqtt://localhost:1234/my/topic')
+
+    # Genrate the URL Identifier
+    assert isinstance(obj.url_id(), str)
 
     # Verify default settings.
     assert re.search(r'qos=0', obj.url())
@@ -127,6 +135,9 @@ def test_plugin_mqtt_multiple_topics_success(mqtt_client_mock):
     obj = apprise.Apprise.instantiate(
         'mqtt://localhost/my/topic,my/other/topic',
         suppress_exceptions=False)
+
+    # Verify we have loaded 2 topics
+    assert len(obj) == 2
 
     assert isinstance(obj, NotifyMQTT)
     assert obj.url().startswith('mqtt://localhost')
@@ -245,7 +256,7 @@ def test_plugin_mqtt_tls_connect_success(mqtt_client_mock):
             tls_version=ssl.PROTOCOL_TLS,
             ciphers=None,
         ),
-        call.tls_insecure_set(True),
+        call.tls_insecure_set(False),
         call.connect('localhost', port=8883, keepalive=30),
         call.loop_start(),
         call.is_connected(),
@@ -292,7 +303,7 @@ def test_plugin_mqtt_tls_no_verify_success(mqtt_client_mock):
     # Verify the right calls have been made to the MQTT client object.
     # Let's only validate the single call of interest is present.
     # Everything else is identical with `test_plugin_mqtt_tls_connect_success`.
-    assert call.tls_insecure_set(False) in mqtt_client_mock.mock_calls
+    assert call.tls_insecure_set(True) in mqtt_client_mock.mock_calls
 
 
 def test_plugin_mqtt_session_client_id_success(mqtt_client_mock):
@@ -309,6 +320,24 @@ def test_plugin_mqtt_session_client_id_success(mqtt_client_mock):
     assert re.search(r'my/topic', obj.url())
     assert re.search(r'client_id=apprise', obj.url())
     assert re.search(r'session=yes', obj.url())
+    assert re.search(r'retain=no', obj.url())
+    assert obj.notify(body="test=test") is True
+
+
+def test_plugin_mqtt_retain(mqtt_client_mock):
+    """
+    Verify handling of Retain Message Flag
+    """
+
+    obj = apprise.Apprise.instantiate(
+        'mqtt://user@localhost/my/topic?retain=yes',
+        suppress_exceptions=False)
+
+    assert isinstance(obj, NotifyMQTT)
+    assert obj.url().startswith('mqtt://user@localhost')
+    assert re.search(r'my/topic', obj.url())
+    assert re.search(r'session=no', obj.url())
+    assert re.search(r'retain=yes', obj.url())
     assert obj.notify(body="test=test") is True
 
 

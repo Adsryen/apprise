@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import os
 import pytest
@@ -35,7 +38,7 @@ from apprise import AppriseAttachment
 from apprise import AppriseAsset
 from apprise import NotifyType
 from apprise import NotifyFormat
-from apprise.plugins.NotifyTelegram import NotifyTelegram
+from apprise.plugins.telegram import NotifyTelegram
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -91,6 +94,27 @@ apprise_url_tests = (
     ('tgram://bottest@123456789:abcdefg_hijklmnop/lead2gold/', {
         'instance': NotifyTelegram,
     }),
+    # Support Thread Topics
+    ('tgram://bottest@123456789:abcdefg_hijklmnop/id1/?topic=12345', {
+        'instance': NotifyTelegram,
+    }),
+    # Thread is just an alias of topic
+    ('tgram://bottest@123456789:abcdefg_hijklmnop/id1/?thread=12345', {
+        'instance': NotifyTelegram,
+    }),
+    # Threads must be numeric
+    ('tgram://bottest@123456789:abcdefg_hijklmnop/id1/?topic=invalid', {
+        'instance': TypeError,
+    }),
+    # content must be 'before' or 'after'
+    ('tgram://bottest@123456789:abcdefg_hijklmnop/id1/?content=invalid', {
+        'instance': TypeError,
+    }),
+    ('tgram://bottest@123456789:abcdefg_hijklmnop/id1:invalid/?thread=12345', {
+        'instance': NotifyTelegram,
+        # Notify will fail (bad target)
+        'response': False,
+    }),
     # Testing image
     ('tgram://123456789:abcdefg_hijklmnop/lead2gold/?image=Yes', {
         'instance': NotifyTelegram,
@@ -105,6 +129,16 @@ apprise_url_tests = (
     }),
     # Testing valid formats
     ('tgram://123456789:abcdefg_hijklmnop/lead2gold/?format=markdown', {
+        'instance': NotifyTelegram,
+    }),
+    ('tgram://123456789:abcdefg_hijklmnop/lead2gold/?format=markdown&mdv=v1', {
+        'instance': NotifyTelegram,
+    }),
+    ('tgram://123456789:abcdefg_hijklmnop/lead2gold/?format=markdown&mdv=v2', {
+        'instance': NotifyTelegram,
+    }),
+    ('tgram://123456789:abcdefg_hijklmnop/l2g/?format=markdown&mdv=bad', {
+        # Defaults to v2
         'instance': NotifyTelegram,
     }),
     ('tgram://123456789:abcdefg_hijklmnop/lead2gold/?format=html', {
@@ -228,7 +262,7 @@ def test_plugin_telegram_general(mock_post):
     invalid_bot_token = 'abcd:123'
 
     # Chat ID
-    chat_ids = 'l2g, lead2gold'
+    chat_ids = 'l2g:1234, lead2gold'
 
     # Prepare Mock
     mock_post.return_value = requests.Request()
@@ -382,7 +416,7 @@ def test_plugin_telegram_general(mock_post):
 
     obj = NotifyTelegram(bot_token=bot_token, targets='12345')
     assert len(obj.targets) == 1
-    assert obj.targets[0] == '12345'
+    assert obj.targets[0] == (12345, None)
 
     # Test the escaping of characters since Telegram escapes stuff for us to
     # which we need to consider
@@ -398,18 +432,26 @@ def test_plugin_telegram_general(mock_post):
     assert payload['text'] == \
         '<b>special characters</b>\r\n\'"This can\'t\t\r\nfail us"\'\r\n'
 
-    # Test sending attachments
-    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
-    assert obj.notify(
-        body='body', title='title', notify_type=NotifyType.INFO,
-        attach=attach) is True
+    for content in ('before', 'after'):
+        # Test our content settings
+        obj = NotifyTelegram(
+            bot_token=bot_token, targets='12345', content=content)
+        # Reset our mock
+        mock_post.reset_mock()
+        # Test sending attachments
+        attach = AppriseAttachment(
+            os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO,
+            attach=attach) is True
 
-    # An invalid attachment will cause a failure
-    path = os.path.join(TEST_VAR_DIR, '/invalid/path/to/an/invalid/file.jpg')
-    attach = AppriseAttachment(path)
-    assert obj.notify(
-        body='body', title='title', notify_type=NotifyType.INFO,
-        attach=path) is False
+        # An invalid attachment will cause a failure
+        path = os.path.join(
+            TEST_VAR_DIR, '/invalid/path/to/an/invalid/file.jpg')
+        attach = AppriseAttachment(path)
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO,
+            attach=path) is False
 
     obj = NotifyTelegram(bot_token=bot_token, targets=None)
     # No user detected; this happens after our firsst notification
@@ -417,7 +459,7 @@ def test_plugin_telegram_general(mock_post):
 
     assert obj.notify(title='hello', body='world') is True
     assert len(obj.targets) == 1
-    assert obj.targets[0] == '532389719'
+    assert obj.targets[0] == ('532389719', None)
 
     # Do the test again, but without the expected (parsed response)
     mock_post.return_value.content = dumps({
@@ -527,7 +569,7 @@ def test_plugin_telegram_general(mock_post):
         'tgram://123456789:ABCdefghijkl123456789opqyz/-123456789525')
     assert isinstance(obj, NotifyTelegram)
     assert len(obj.targets) == 1
-    assert '-123456789525' in obj.targets
+    assert (-123456789525, None) in obj.targets
 
 
 @mock.patch('requests.post')
@@ -653,7 +695,38 @@ def test_plugin_telegram_formatting(mock_post):
            ' had [a change](http://127.0.0.1)'
 
     aobj = Apprise()
-    aobj.add('tgram://123456789:abcdefg_hijklmnop/?format=markdown')
+    aobj.add('tgram://123456789:abcdefg_hijklmnop/?format=markdown&mdv=2')
+    assert len(aobj) == 1
+
+    assert aobj.notify(
+        title=title, body=body, body_format=NotifyFormat.MARKDOWN)
+
+    # Test our calls
+    assert mock_post.call_count == 2
+
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://api.telegram.org/bot123456789:abcdefg_hijklmnop/getUpdates'
+    assert mock_post.call_args_list[1][0][0] == \
+        'https://api.telegram.org/bot123456789:abcdefg_hijklmnop/sendMessage'
+
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    # Test that everything is escaped properly in a HTML mode
+    assert payload['text'] == \
+        '# 🚨 Change detected for _Apprise Test Title_\r\n' \
+        '_[Apprise Body Title](http://localhost)_ had ' \
+        '[a change](http://127.0.0.1)'
+
+    # Reset our values
+    mock_post.reset_mock()
+
+    # Now test our MARKDOWN Handling
+    title = '# 🚨 Change detected for _Apprise Test Title_'
+    body = '_[Apprise Body Title](http://localhost)_' \
+           ' had [a change](http://127.0.0.1)'
+
+    aobj = Apprise()
+    aobj.add('tgram://123456789:abcdefg_hijklmnop/?format=markdown&mdv=1')
     assert len(aobj) == 1
 
     assert aobj.notify(
@@ -717,9 +790,9 @@ def test_plugin_telegram_formatting(mock_post):
     # Reset our values
     mock_post.reset_mock()
 
-    # Upstream to use HTML but input specified as Markdown
+    # Upstream to use HTML but input specified as Markdown v1
     aobj = Apprise()
-    aobj.add('tgram://987654321:abcdefg_hijklmnop/?format=markdown')
+    aobj.add('tgram://987654321:abcdefg_hijklmnop/?format=markdown&mdv=1')
     assert len(aobj) == 1
 
     # Now test our MARKDOWN Handling (no title defined... not really anyway)
@@ -742,23 +815,16 @@ def test_plugin_telegram_formatting(mock_post):
 
     payload = loads(mock_post.call_args_list[1][1]['data'])
 
-    # Test that everything is escaped properly in a HTML mode
-    assert payload['text'] == \
-        '_[Apprise Body Title](http://localhost)_ had ' \
-        '[a change](http://127.0.0.2)'
+    # Test that everything is escaped properly in a MARKDOWN mode
+    assert payload['text'] == body
 
     # Reset our values
     mock_post.reset_mock()
 
-    # Upstream to use HTML but input specified as Markdown
+    # Upstream to use HTML but input specified as Markdown v2
     aobj = Apprise()
-    aobj.add('tgram://987654321:abcdefg_hijklmnop/?format=markdown')
+    aobj.add('tgram://987654321:abcdefg_hijklmnop/?format=markdown&mdv=2')
     assert len(aobj) == 1
-
-    # Set an actual title this time
-    title = '# A Great Title'
-    body = '_[Apprise Body Title](http://localhost)_' \
-           ' had [a change](http://127.0.0.2)'
 
     # MARKDOWN forced by the command line, but TEXT specified as
     # upstream mode
@@ -775,9 +841,115 @@ def test_plugin_telegram_formatting(mock_post):
 
     payload = loads(mock_post.call_args_list[1][1]['data'])
 
-    # Test that everything is escaped properly in a HTML mode
+    # Test that everything is escaped properly in a MARKDOWN mode
     assert payload['text'] == \
-        '# A Great Title\r\n_[Apprise Body Title](http://localhost)_ had ' \
+        '\\_\\[Apprise Body Title\\]\\(http://localhost\\)\\_ had \\' \
+        '[a change\\]\\(http://127\\.0\\.0\\.2\\)'
+
+    # Reset our values
+    mock_post.reset_mock()
+
+    # Upstream to use HTML but input specified as Markdown v1
+    aobj = Apprise()
+    aobj.add('tgram://987654321:abcdefg_hijklmnop/?format=markdown&mdv=1')
+    assert len(aobj) == 1
+
+    # Set an actual title this time
+    title = '# A Great Title'
+    body = '_[Apprise Body Title](http://localhost)_' \
+           ' had [a change](http://127.0.0.2)'
+
+    # TEXT forced by the command line, but MARKDOWN specified as
+    # upstream mode
+    assert aobj.notify(
+        title=title, body=body, body_format=NotifyFormat.TEXT)
+
+    # Test our calls
+    assert mock_post.call_count == 2
+
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://api.telegram.org/bot987654321:abcdefg_hijklmnop/getUpdates'
+    assert mock_post.call_args_list[1][0][0] == \
+        'https://api.telegram.org/bot987654321:abcdefg_hijklmnop/sendMessage'
+
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    # Test that everything is escaped properly in a MARKDOWN mode
+    assert payload['text'] == \
+        '# A Great Title\r\n' \
+        '_[Apprise Body Title](http://localhost)_ had ' \
+        '[a change](http://127.0.0.2)'
+
+    # Reset our values
+    mock_post.reset_mock()
+
+    # Upstream to use HTML but input specified as Markdown v2
+    aobj = Apprise()
+    aobj.add('tgram://987654321:abcdefg_hijklmnop/?format=markdown&mdv=2')
+    assert len(aobj) == 1
+
+    # TEXT forced by the command line, but MARKDOWN specified as
+    # upstream mode
+    assert aobj.notify(
+        title=title, body=body, body_format=NotifyFormat.TEXT)
+
+    # Test our calls
+    assert mock_post.call_count == 2
+
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://api.telegram.org/bot987654321:abcdefg_hijklmnop/getUpdates'
+    assert mock_post.call_args_list[1][0][0] == \
+        'https://api.telegram.org/bot987654321:abcdefg_hijklmnop/sendMessage'
+
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    # Test that everything is escaped properly in a MARKDOWN mode
+    assert payload['text'] == \
+        '\\# A Great Title\r\n' \
+        '\\_\\[Apprise Body Title\\]\\(http://localhost\\)\\_ had ' \
+        '\\[a change\\]\\(http://127\\.0\\.0\\.2\\)'
+
+    # Reset our values
+    mock_post.reset_mock()
+
+    # If input is markdown and output is v2, it is expected the user knows
+    # what he is doing... no esaping takes place
+    assert aobj.notify(
+        title=title, body=body, body_format=NotifyFormat.MARKDOWN)
+
+    # Test our calls
+    assert mock_post.call_count == 1
+
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://api.telegram.org/bot987654321:abcdefg_hijklmnop/sendMessage'
+
+    payload = loads(mock_post.call_args_list[0][1]['data'])
+
+    # No escaping in this circumstance
+    assert payload['text'] == \
+        '# A Great Title\r\n' \
+        '_[Apprise Body Title](http://localhost)_ had ' \
+        '[a change](http://127.0.0.2)'
+
+    # Reset our values
+    mock_post.reset_mock()
+
+    # No body format specified at all... user definitely must know what
+    # they are doing... still no escaping in this circumstance
+    assert aobj.notify(title=title, body=body)
+
+    # Test our calls
+    assert mock_post.call_count == 1
+
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://api.telegram.org/bot987654321:abcdefg_hijklmnop/sendMessage'
+
+    payload = loads(mock_post.call_args_list[0][1]['data'])
+
+    # No escaping in this circumstance
+    assert payload['text'] == \
+        '# A Great Title\r\n' \
+        '_[Apprise Body Title](http://localhost)_ had ' \
         '[a change](http://127.0.0.2)'
 
     # Reset our values
@@ -874,12 +1046,9 @@ def test_plugin_telegram_html_formatting(mock_post):
     NotifyTelegram() HTML Formatting
 
     """
-    # on't send anything other than <b>, <i>, <a>,<code> and <pre>
-
     # Prepare Mock
     mock_post.return_value = requests.Request()
     mock_post.return_value.status_code = requests.codes.ok
-    mock_post.return_value.content = '{}'
 
     # Simple success response
     mock_post.return_value.content = dumps({
@@ -909,7 +1078,6 @@ def test_plugin_telegram_html_formatting(mock_post):
             }},
         ],
     })
-    mock_post.return_value.status_code = requests.codes.ok
 
     aobj = Apprise()
     aobj.add('tgram://123456789:abcdefg_hijklmnop/')
@@ -972,3 +1140,190 @@ def test_plugin_telegram_html_formatting(mock_post):
         '<b>Heading 3</b>\r\n<b>Heading 4</b>\r\n<b>Heading 5</b>\r\n' \
         '<b>Heading 6</b>\r\nA set of text\r\n' \
         'Another line after the set of text\r\nMore text\r\nlabel'
+
+
+@mock.patch('requests.post')
+def test_plugin_telegram_threads(mock_post):
+    """
+    NotifyTelegram() Threads/Topics
+
+    """
+    # Prepare Mock
+    mock_post.return_value = requests.Request()
+    mock_post.return_value.status_code = requests.codes.ok
+
+    # Simple success response
+    mock_post.return_value.content = dumps({
+        "ok": True,
+        "result": [{
+            "update_id": 645421321,
+            "message": {
+                "message_id": 2,
+                "from": {
+                    "id": 532389719,
+                    "is_bot": False,
+                    "first_name": "Chris",
+                    "language_code": "en-US"
+                },
+                "chat": {
+                    "id": 532389719,
+                    "first_name": "Chris",
+                    "type": "private"
+                },
+                "date": 1519694394,
+                "text": "/start",
+                "entities": [{
+                    "offset": 0,
+                    "length": 6,
+                    "type": "bot_command",
+                }],
+            }},
+        ],
+    })
+
+    aobj = Apprise()
+    aobj.add('tgram://123456789:abcdefg_hijklmnop/?thread=1234')
+
+    assert len(aobj) == 1
+
+    assert isinstance(aobj[0], NotifyTelegram)
+
+    body = 'my threaded message'
+
+    assert aobj.notify(body=body)
+
+    # 1 call to look up bot owner, and second for notification
+    assert mock_post.call_count == 2
+
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    assert 'message_thread_id' in payload
+    assert payload['message_thread_id'] == 1234
+
+    mock_post.reset_mock()
+
+    aobj = Apprise()
+    aobj.add('tgram://123456789:abcdefg_hijklmnop/?topic=1234')
+
+    assert len(aobj) == 1
+
+    assert isinstance(aobj[0], NotifyTelegram)
+
+    body = 'my message'
+
+    assert aobj.notify(body=body)
+
+    # 1 call to look up bot owner, and second for notification
+    assert mock_post.call_count == 2
+
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    assert 'message_thread_id' in payload
+    assert payload['message_thread_id'] == 1234
+
+    mock_post.reset_mock()
+
+    aobj = Apprise()
+    aobj.add('tgram://123456789:abcdefg_hijklmnop/9876:1234/9876:1111')
+
+    assert len(aobj) == 1
+
+    assert isinstance(aobj[0], NotifyTelegram)
+
+    body = 'my message'
+
+    assert aobj.notify(body=body)
+
+    # 1 call to look up bot owner, and second for notification
+    assert mock_post.call_count == 2
+
+    payload = loads(mock_post.call_args_list[0][1]['data'])
+
+    assert 'message_thread_id' in payload
+    assert payload['message_thread_id'] == 1111
+
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    assert 'message_thread_id' in payload
+    assert payload['message_thread_id'] == 1234
+
+    mock_post.reset_mock()
+
+
+@mock.patch('requests.post')
+def test_plugin_telegram_markdown_v2(mock_post):
+    """
+    NotifyTelegram() MarkdownV2
+
+    """
+    # Prepare Mock
+    mock_post.return_value = requests.Request()
+    mock_post.return_value.status_code = requests.codes.ok
+
+    # Simple success response
+    mock_post.return_value.content = dumps({
+        "ok": True,
+        "result": [{
+            "update_id": 645421321,
+            "message": {
+                "message_id": 2,
+                "from": {
+                    "id": 532389719,
+                    "is_bot": False,
+                    "first_name": "Chris",
+                    "language_code": "en-US"
+                },
+                "chat": {
+                    "id": 532389719,
+                    "first_name": "Chris",
+                    "type": "private"
+                },
+                "date": 1519694394,
+                "text": "/start",
+                "entities": [{
+                    "offset": 0,
+                    "length": 6,
+                    "type": "bot_command",
+                }],
+            }},
+        ],
+    })
+
+    aobj = Apprise()
+    aobj.add('tgram://123456789:abcdefg_hijklmnop/?mdv=2&format=markdown')
+    assert len(aobj) == 1
+    assert isinstance(aobj[0], NotifyTelegram)
+
+    body = '# my message\r\n## more content\r\n\\# already escaped hashtag'
+
+    # Test with body format set to markdown
+    assert aobj.notify(body=body, body_format=NotifyFormat.TEXT)
+
+    # 1 call to look up bot owner, and second for notification
+    assert mock_post.call_count == 2
+    payload = loads(mock_post.call_args_list[1][1]['data'])
+
+    # Our content is escapped properly
+    assert payload['text'] == '\\# my message\r\n' \
+        '\\#\\# more content\r\n\\# already escaped hashtag'
+
+    mock_post.reset_mock()
+
+    # We'll iterate over all of the bad unsupported characters
+    mdv2_unsupported = (
+        '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '=', '|', '{',
+        '}', '.', '!', '-')
+
+    for c in mdv2_unsupported:
+        body = f'bad character: {c}, and already escapped \\{c}'
+
+        # Test with body format set to markdown
+        assert aobj.notify(body=body, body_format=NotifyFormat.TEXT)
+        assert mock_post.call_count == 1
+        payload = loads(mock_post.call_args_list[0][1]['data'])
+
+        # Our content is escapped properly
+        assert payload['text'] == \
+            f'bad character: \\{c}, and already escapped \\{c}'
+
+        mock_post.reset_mock()

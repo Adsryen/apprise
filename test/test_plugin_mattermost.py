@@ -1,31 +1,36 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-import pytest
-import requests
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
-from apprise.plugins.NotifyMattermost import NotifyMattermost
+import pytest
+import json
+import requests
+from apprise import Apprise
+from apprise.plugins.mattermost import NotifyMattermost
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -53,6 +58,9 @@ apprise_url_tests = (
     ('mmost://user@localhost/3ccdd113474722377935511fc85d3dd4?channel=test', {
         'instance': NotifyMattermost,
     }),
+    ('mmost://user@localhost/3ccdd113474722377935511fc85d3dd4?channels=test', {
+        'instance': NotifyMattermost,
+    }),
     ('mmost://user@localhost/3ccdd113474722377935511fc85d3dd4?to=test', {
         'instance': NotifyMattermost,
 
@@ -62,10 +70,10 @@ apprise_url_tests = (
     ('mmost://localhost/3ccdd113474722377935511fc85d3dd4'
      '?to=test&image=True', {
          'instance': NotifyMattermost}),
-    ('mmost://localhost/3ccdd113474722377935511fc85d3dd4' \
+    ('mmost://localhost/3ccdd113474722377935511fc85d3dd4'
      '?to=test&image=False', {
          'instance': NotifyMattermost}),
-    ('mmost://localhost/3ccdd113474722377935511fc85d3dd4' \
+    ('mmost://localhost/3ccdd113474722377935511fc85d3dd4'
      '?to=test&image=True', {
          'instance': NotifyMattermost,
          # don't include an image by default
@@ -84,6 +92,11 @@ apprise_url_tests = (
     }),
     ('mmosts://localhost/3ccdd113474722377935511fc85d3dd4', {
         'instance': NotifyMattermost,
+    }),
+    ('https://mattermost.example.com/hooks/3ccdd113474722377935511fc85d3dd4', {
+        'instance': NotifyMattermost,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'mmosts://mattermost.example.com/3...4/',
     }),
     # Test our paths
     ('mmosts://localhost/a/path/3ccdd113474722377935511fc85d3dd4', {
@@ -113,6 +126,17 @@ apprise_url_tests = (
 )
 
 
+@pytest.fixture
+def request_mock(mocker):
+    """
+    Prepare requests mock.
+    """
+    mock_post = mocker.patch("requests.post")
+    mock_post.return_value = requests.Request()
+    mock_post.return_value.status_code = requests.codes.ok
+    return mock_post
+
+
 def test_plugin_mattermost_urls():
     """
     NotifyMattermost() Apprise URLs
@@ -134,3 +158,44 @@ def test_plugin_mattermost_edge_cases():
         NotifyMattermost(None)
     with pytest.raises(TypeError):
         NotifyMattermost("     ")
+
+
+def test_plugin_mattermost_channels(request_mock):
+    """
+    NotifyMattermost() Channel Testing
+    """
+
+    # Test channels with/without hashtag (#)
+    user = 'user1'
+    token = 'token'
+    channels = ['#one', 'two']
+
+    # Instantiate our URL
+    obj = Apprise.instantiate(
+        'mmost://{user}@localhost:8065/{token}?channels={channels}'.format(
+            user=user,
+            token=token,
+            channels=','.join(channels)))
+
+    assert isinstance(obj, NotifyMattermost)
+    assert obj.notify(body="body", title='title') is True
+
+    assert request_mock.called is True
+    assert request_mock.call_count == 2
+    assert request_mock.call_args_list[0][0][0].startswith(
+        'http://localhost:8065/hooks/token')
+
+    # Our Posted JSON Object
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
+    assert 'username' in posted_json
+    assert 'channel' in posted_json
+    assert 'text' in posted_json
+    assert posted_json['username'] == 'user1'
+    assert posted_json['channel'] == 'one'
+    assert posted_json['text'] == 'title\r\nbody'
+
+    # Our second Posted JSON Object
+    posted_json = json.loads(request_mock.call_args_list[1][1]['data'])
+    assert posted_json['username'] == 'user1'
+    assert posted_json['channel'] == 'two'
+    assert posted_json['text'] == 'title\r\nbody'

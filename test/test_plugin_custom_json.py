@@ -1,29 +1,32 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
 import os
-import sys
 import json
 from unittest import mock
 
@@ -32,7 +35,7 @@ from apprise import Apprise
 from apprise import AppriseAttachment
 from apprise import NotifyType
 
-from apprise.plugins.NotifyJSON import NotifyJSON
+from apprise.plugins.custom_json import NotifyJSON
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -83,6 +86,9 @@ apprise_url_tests = (
         'instance': NotifyJSON,
     }),
     ('json://user@localhost?method=delete', {
+        'instance': NotifyJSON,
+    }),
+    ('json://user@localhost?method=patch', {
         'instance': NotifyJSON,
     }),
 
@@ -165,8 +171,11 @@ def test_plugin_custom_json_edge_cases(mock_get, mock_post):
     mock_post.return_value = response
     mock_get.return_value = response
 
+    # This string also tests that type is set to nothing
     results = NotifyJSON.parse_url(
-        'json://localhost:8080/command?:message=test&method=GET')
+        'json://localhost:8080/command?'
+        ':message=msg&:test=value&method=GET'
+        '&:type=')
 
     assert isinstance(results, dict)
     assert results['user'] is None
@@ -178,8 +187,10 @@ def test_plugin_custom_json_edge_cases(mock_get, mock_post):
     assert results['query'] == 'command'
     assert results['schema'] == 'json'
     assert results['url'] == 'json://localhost:8080/command'
-    assert isinstance(results['qsd:'], dict) is True
-    assert results['qsd:']['message'] == 'test'
+    assert isinstance(results['qsd:'], dict)
+    assert results['qsd:']['message'] == 'msg'
+    # empty special mapping
+    assert results['qsd:']['type'] == ''
 
     instance = NotifyJSON(**results)
     assert isinstance(instance, NotifyJSON)
@@ -194,9 +205,16 @@ def test_plugin_custom_json_edge_cases(mock_get, mock_post):
     assert 'title' in details[1]['data']
     dataset = json.loads(details[1]['data'])
     assert dataset['title'] == 'title'
-    assert 'message' in dataset
-    # message over-ride was provided
-    assert dataset['message'] == 'test'
+    assert 'message' not in dataset
+    assert 'msg' in dataset
+    # type was set to nothing which implies it should be removed
+    assert 'type' not in dataset
+    # message over-ride was provided; the body is now in `msg` and not
+    # `message`
+    assert dataset['msg'] == 'body'
+
+    assert 'test' in dataset
+    assert dataset['test'] == 'value'
 
     assert instance.url(privacy=False).startswith(
         'json://localhost:8080/command?')
@@ -238,13 +256,6 @@ def test_notify_json_plugin_attachments(mock_post):
         body='body', title='title', notify_type=NotifyType.INFO,
         attach=path) is False
 
-    # Get a appropriate "builtin" module name for pythons 2/3.
-    if sys.version_info.major >= 3:
-        builtin_open_function = 'builtins.open'
-
-    else:
-        builtin_open_function = '__builtin__.open'
-
     # Test Valid Attachment (load 3)
     path = (
         os.path.join(TEST_VAR_DIR, 'apprise-test.gif'),
@@ -256,7 +267,7 @@ def test_notify_json_plugin_attachments(mock_post):
     # Return our good configuration
     mock_post.side_effect = None
     mock_post.return_value = okay_response
-    with mock.patch(builtin_open_function, side_effect=OSError()):
+    with mock.patch('builtins.open', side_effect=OSError()):
         # We can't send the message we can't open the attachment for reading
         assert obj.notify(
             body='body', title='title', notify_type=NotifyType.INFO,
@@ -272,3 +283,71 @@ def test_notify_json_plugin_attachments(mock_post):
         body='body', title='title', notify_type=NotifyType.INFO,
         attach=attach) is True
     assert mock_post.call_count == 1
+
+
+# Based on incomming webhook details defined here:
+# https://kb.synology.com/en-au/DSM/help/Chat/chat_integration
+@mock.patch('requests.post')
+def test_plugin_custom_form_for_synology(mock_post):
+    """
+    NotifyJSON() Synology Chat Test Case
+
+    """
+
+    # Prepare our response
+    response = requests.Request()
+    response.status_code = requests.codes.ok
+
+    # Prepare Mock
+    mock_post.return_value = response
+
+    # This is rather confusing, it may be easier to leverage the
+    # synology:// and synologys:// plugins instead, but this is just to prove
+    # that the same message can be sent using the json:// plugin.
+
+    results = NotifyJSON.parse_url(
+        'jsons://localhost:8081/webapi/entry.cgi?'
+        '-api=SYNO.Chat.External&-method=incoming&-version=2&-token=abc123'
+        '&:message=text&:version=&:type=&:title=&:attachments'
+        '&:file_url=https://i.redd.it/my2t4d2fx0u31.jpg')
+
+    assert isinstance(results, dict)
+    assert results['user'] is None
+    assert results['password'] is None
+    assert results['port'] == 8081
+    assert results['host'] == 'localhost'
+    assert results['fullpath'] == '/webapi/entry.cgi'
+    assert results['path'] == '/webapi/'
+    assert results['query'] == 'entry.cgi'
+    assert results['schema'] == 'jsons'
+    assert results['url'] == 'jsons://localhost:8081/webapi/entry.cgi'
+    assert isinstance(results['qsd:'], dict)
+    # Header Entries
+    assert results['qsd-']['api'] == 'SYNO.Chat.External'
+    assert results['qsd-']['method'] == 'incoming'
+    assert results['qsd-']['version'] == '2'
+    assert results['qsd-']['token'] == 'abc123'
+
+    instance = NotifyJSON(**results)
+    assert isinstance(instance, NotifyJSON)
+
+    response = instance.send(title='title', body='body')
+    assert response is True
+    assert mock_post.call_count == 1
+
+    details = mock_post.call_args_list[0]
+    assert details[0][0] == 'https://localhost:8081/webapi/entry.cgi'
+
+    params = details[1]['params']
+    assert params.get('api') == 'SYNO.Chat.External'
+    assert params.get('method') == 'incoming'
+    assert params.get('version') == '2'
+    assert params.get('token') == 'abc123'
+
+    payload = json.loads(details[1]['data'])
+    assert 'version' not in payload
+    assert 'title' not in payload
+    assert 'message' not in payload
+    assert 'type' not in payload
+    assert payload.get('text') == 'body'
+    assert payload.get('file_url') == 'https://i.redd.it/my2t4d2fx0u31.jpg'

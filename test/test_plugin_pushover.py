@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import os
 from unittest import mock
@@ -29,7 +32,7 @@ from unittest import mock
 import requests
 import pytest
 from json import dumps
-from apprise.plugins.NotifyPushover import PushoverPriority, NotifyPushover
+from apprise.plugins.pushover import PushoverPriority, NotifyPushover
 import apprise
 from helpers import AppriseURLTester
 
@@ -53,9 +56,9 @@ apprise_url_tests = (
     ('pover://%s' % ('a' * 30), {
         'instance': TypeError,
     }),
-    # API Key + invalid sound setting
-    ('pover://%s@%s?sound=invalid' % ('u' * 30, 'a' * 30), {
-        'instance': TypeError,
+    # API Key + custom sound setting
+    ('pover://%s@%s?sound=mysound' % ('u' * 30, 'a' * 30), {
+        'instance': NotifyPushover,
     }),
     # API Key + valid alternate sound picked
     ('pover://%s@%s?sound=spacealarm' % ('u' * 30, 'a' * 30), {
@@ -80,7 +83,7 @@ apprise_url_tests = (
         'instance': NotifyPushover,
     }),
     # API Key + Valid User + 2 Devices
-    ('pover://%s@%s/DEVICE1/DEVICE2/' % ('u' * 30, 'a' * 30), {
+    ('pover://%s@%s/DEVICE1/Device-with-dash/' % ('u' * 30, 'a' * 30), {
         'instance': NotifyPushover,
 
         # Our expected url(privacy=True) startswith() response:
@@ -337,16 +340,17 @@ def test_plugin_pushover_edge_cases(mock_post):
 
     obj = NotifyPushover(
         user_key=user_key, token=token, targets=devices)
-    assert isinstance(obj, NotifyPushover) is True
-    assert len(obj.targets) == 3
+    assert isinstance(obj, NotifyPushover)
+    # Our invalid device is ignored
+    assert len(obj.targets) == 2
 
-    # This call fails because there is 1 invalid device
+    # We notify the 2 devices loaded
     assert obj.notify(
         body='body', title='title',
-        notify_type=apprise.NotifyType.INFO) is False
+        notify_type=apprise.NotifyType.INFO) is True
 
     obj = NotifyPushover(user_key=user_key, token=token)
-    assert isinstance(obj, NotifyPushover) is True
+    assert isinstance(obj, NotifyPushover)
     # Default is to send to all devices, so there will be a
     # device defined here
     assert len(obj.targets) == 1
@@ -358,7 +362,7 @@ def test_plugin_pushover_edge_cases(mock_post):
 
     obj = NotifyPushover(
         user_key=user_key, token=token, targets=set())
-    assert isinstance(obj, NotifyPushover) is True
+    assert isinstance(obj, NotifyPushover)
     # Default is to send to all devices, so there will be a
     # device defined here
     assert len(obj.targets) == 1
@@ -439,4 +443,9 @@ def test_plugin_pushover_config_files(mock_post):
         PushoverPriority.NORMAL
 
     # Notifications work
+    # We test 'pushover_str_int' and 'low' which only matches 1 end point
+    assert aobj.notify(
+        title="title", body="body", tag=[('pushover_str_int', 'low')]) is True
+
+    # Notify everything loaded
     assert aobj.notify(title="title", body="body") is True

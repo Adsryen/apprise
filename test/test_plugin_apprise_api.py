@@ -1,34 +1,46 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2021 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-from apprise.plugins.NotifyAppriseAPI import NotifyAppriseAPI
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import os
+from unittest import mock
+from apprise.plugins.apprise_api import NotifyAppriseAPI
 from helpers import AppriseURLTester
 import requests
+from apprise import Apprise
+from apprise import AppriseAttachment
+from apprise import NotifyType
 
 # Disable logging for a cleaner testing output
 import logging
 logging.disable(logging.CRITICAL)
+
+# Attachment Directory
+TEST_VAR_DIR = os.path.join(os.path.dirname(__file__), 'var')
 
 # Our Testing URLs
 apprise_url_tests = (
@@ -54,6 +66,12 @@ apprise_url_tests = (
     }),
     # A valid URL with Token
     ('apprise://localhost/%s' % ('a' * 32), {
+        'instance': NotifyAppriseAPI,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'apprise://localhost/a...a/',
+    }),
+    # A valid URL with long Token
+    ('apprise://localhost/%s' % ('a' * 128), {
         'instance': NotifyAppriseAPI,
         # Our expected url(privacy=True) startswith() response:
         'privacy_url': 'apprise://localhost/a...a/',
@@ -126,6 +144,20 @@ apprise_url_tests = (
         # Our expected url(privacy=True) startswith() response:
         'privacy_url': 'apprises://localhost:8080/m...4/',
     }),
+    ('apprises://localhost:8080/abc123/?method=json', {
+        'instance': NotifyAppriseAPI,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'apprises://localhost:8080/a...3/',
+    }),
+    ('apprises://localhost:8080/abc123/?method=form', {
+        'instance': NotifyAppriseAPI,
+        # Our expected url(privacy=True) startswith() response:
+        'privacy_url': 'apprises://localhost:8080/a...3/',
+    }),
+    # Invalid method specified
+    ('apprises://localhost:8080/abc123/?method=invalid', {
+        'instance': TypeError,
+    }),
     ('apprises://user:password@localhost:8080/mytoken5/', {
         'instance': NotifyAppriseAPI,
 
@@ -164,3 +196,81 @@ def test_plugin_apprise_urls():
 
     # Run our general tests
     AppriseURLTester(tests=apprise_url_tests).run_all()
+
+
+@mock.patch('requests.post')
+def test_notify_apprise_api_attachments(mock_post):
+    """
+    NotifyAppriseAPI() Attachments
+
+    """
+
+    okay_response = requests.Request()
+
+    for method in ('json', 'form'):
+        okay_response.status_code = requests.codes.ok
+        okay_response.content = ""
+
+        # Assign our mock object our return value
+        mock_post.return_value = okay_response
+
+        obj = Apprise.instantiate(
+            'apprise://user@localhost/mytoken1/?method={}'.format(method))
+        assert isinstance(obj, NotifyAppriseAPI)
+
+        # Test Valid Attachment
+        path = os.path.join(TEST_VAR_DIR, 'apprise-test.gif')
+        attach = AppriseAttachment(path)
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO,
+            attach=attach) is True
+
+        # Test invalid attachment
+        path = os.path.join(
+            TEST_VAR_DIR, '/invalid/path/to/an/invalid/file.jpg')
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO,
+            attach=path) is False
+
+        # Test Valid Attachment (load 3)
+        path = (
+            os.path.join(TEST_VAR_DIR, 'apprise-test.gif'),
+            os.path.join(TEST_VAR_DIR, 'apprise-test.gif'),
+            os.path.join(TEST_VAR_DIR, 'apprise-test.gif'),
+        )
+        attach = AppriseAttachment(path)
+
+        # Return our good configuration
+        mock_post.side_effect = None
+        mock_post.return_value = okay_response
+        with mock.patch('builtins.open', side_effect=OSError()):
+            # We can't send the message we can't open the attachment for
+            # reading
+            assert obj.notify(
+                body='body', title='title', notify_type=NotifyType.INFO,
+                attach=attach) is False
+
+        with mock.patch('requests.post', side_effect=OSError()):
+            # Attachment issue
+            assert obj.notify(
+                body='body', title='title', notify_type=NotifyType.INFO,
+                attach=attach) is False
+
+        # test the handling of our batch modes
+        obj = Apprise.instantiate('apprise://user@localhost/mytoken1/')
+        assert isinstance(obj, NotifyAppriseAPI)
+
+        # Now send an attachment normally without issues
+        mock_post.reset_mock()
+
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO,
+            attach=attach) is True
+        assert mock_post.call_count == 1
+
+        details = mock_post.call_args_list[0]
+        assert details[0][0] == 'http://localhost/notify/mytoken1'
+        assert obj.url(privacy=False).startswith(
+            'apprise://user@localhost/mytoken1/')
+
+        mock_post.reset_mock()

@@ -1,38 +1,43 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import pytest
-from apprise.AppriseAsset import AppriseAsset
-from apprise.config.ConfigBase import ConfigBase
+from apprise import AppriseAsset
+from apprise.config import ConfigBase
+from apprise import Apprise
 from apprise import ConfigFormat
+from inspect import cleandoc
 import yaml
 
 # Disable logging for a cleaner testing output
 import logging
 
-from apprise.plugins.NotifyEmail import NotifyEmail
+from apprise.plugins.email import NotifyEmail
 
 logging.disable(logging.CRITICAL)
 
@@ -182,11 +187,11 @@ version: 1
 urls:
   - pbul://o.gn5kj6nfhv736I7jC3cj3QLRiyhgl98b
   - mailto://test:password@gmail.com
-  - syslog://:
+  - json://localhost:
       - tag: devops, admin
     """, asset=AppriseAsset())
 
-    # We expect to parse 3 entries from the above
+    # We expect to parse 2 entries from the above
     assert isinstance(result, tuple)
     assert len(result) == 2
     assert isinstance(result[0], list)
@@ -214,6 +219,32 @@ urls:
     # Parseable
     assert isinstance(result, list)
     assert len(result) == 1
+
+
+def test_config_base_discord_bug_report_01():
+    """
+    API: ConfigBase.config_parse user feedback
+
+    A Discord report that a tag was not correctly assigned to a URL when
+    presented in the following format
+       urls:
+         - json://myhost:
+           - tag: test
+             userid: test
+    """
+    result, config = ConfigBase.config_parse("""
+    urls:
+      - json://myhost:
+        - tag: test
+          userid: test
+    """, asset=AppriseAsset())
+
+    # We expect to parse 4 entries from the above
+    assert isinstance(result, list)
+    assert isinstance(config, list)
+    assert len(result) == 1
+    assert len(result[0].tags) == 1
+    assert 'test' in result[0].tags
 
 
 def test_config_base_config_parse_text():
@@ -258,7 +289,7 @@ def test_config_base_config_parse_text():
     # A relative include statement (with trailing spaces)
     include apprise.cfg     """, asset=AppriseAsset())
 
-    # We expect to parse 3 entries from the above
+    # We expect to parse 4 entries from the above
     assert isinstance(result, list)
     assert isinstance(config, list)
     assert len(result) == 4
@@ -324,7 +355,7 @@ def test_config_base_config_parse_text():
     assert isinstance(result, list)
     assert len(result) == 0
 
-    # There was 1 valid entry
+    # There were no include entries defined
     assert len(config) == 0
 
     # Test case where a comment is on it's own line with nothing else
@@ -334,6 +365,199 @@ def test_config_base_config_parse_text():
     assert len(result) == 0
 
     # There were no include entries defined
+    assert len(config) == 0
+
+    # Verify our tagging works when multiple tags are provided
+    result, config = ConfigBase.config_parse_text("""
+    tag1, tag2, tag3=json://user:pass@localhost
+    """)
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert len(result[0].tags) == 3
+    assert 'tag1' in result[0].tags
+    assert 'tag2' in result[0].tags
+    assert 'tag3' in result[0].tags
+
+
+def test_config_base_config_tag_groups_text():
+    """
+    API: ConfigBase.config_tag_groups_text object
+
+    """
+
+    # Valid Configuration
+    result, config = ConfigBase.config_parse_text("""
+    # Tag assignments
+    groupA, groupB = tagB, tagC
+
+    # groupB doubles down as it takes the entries initialized above
+    # plus the added ones defined below
+    groupB = tagA, tagB, tagD
+    groupC = groupA, groupB, groupC, tagE
+
+    # Tag that recursively looks to more tags
+    groupD = groupC
+
+    # Assigned ourselves
+    groupX = groupX
+
+    # Set up a recursive loop
+    groupE = groupF
+    groupF = groupE
+
+    # Set up a larger recursive loop
+    groupG = groupH
+    groupH = groupI
+    groupI = groupJ
+    groupJ = groupK
+    groupK = groupG
+
+    # Bad assignments
+    groupM = , , ,
+     , ,   = , , ,
+
+    # int's and floats are okay
+    1 = 2
+    a = 5
+
+    # A comment line over top of a URL
+    4, groupB = mailto://userb:pass@gmail.com
+
+    # Tag Assignments
+    tagA,groupB=json://localhost
+
+    # More Tag Assignments
+    tagC,groupB=xml://localhost
+
+    # More Tag Assignments
+    groupD=form://localhost
+
+    """, asset=AppriseAsset())
+
+    # We expect to parse 4 entries from the above
+    assert isinstance(result, list)
+    assert isinstance(config, list)
+    assert len(result) == 4
+
+    # Our first element is our group tags
+    assert len(result[0].tags) == 2
+    assert 'groupB' in result[0].tags
+    assert '4' in result[0].tags
+
+    # No additional configuration is loaded
+    assert len(config) == 0
+
+    apobj = Apprise()
+    assert apobj.add(result)
+    # We match against 1 entry
+    assert len([x for x in apobj.find('tagA')]) == 1
+    assert len([x for x in apobj.find('tagB')]) == 0
+    assert len([x for x in apobj.find('groupA')]) == 1
+    assert len([x for x in apobj.find('groupB')]) == 3
+    assert len([x for x in apobj.find('groupC')]) == 2
+    assert len([x for x in apobj.find('groupD')]) == 3
+
+    # Invalid Assignment
+    result, config = ConfigBase.config_parse_text("""
+    # Must have something to equal or it's a bad line
+    group =
+
+    # A tag Assignments that is never gotten to as the line
+    # above is bad
+    groupD=form://localhost
+    """)
+
+    # We expect to parse 0 entries from the above
+    assert isinstance(result, list)
+    assert isinstance(config, list)
+    assert len(result) == 0
+    assert len(config) == 0
+
+    # Invalid Assignment
+    result, config = ConfigBase.config_parse_text("""
+    # Rundant assignment
+    group = group
+
+    # Our group assignment
+    group=windows://
+
+    """)
+
+    # the redundant assignment does us no harm; but it doesn't grant us any
+    # value either
+    assert isinstance(result, list)
+    assert len(result) == 1
+
+    # Our first element is our group tags
+    assert len(result[0].tags) == 1
+    assert 'group' in result[0].tags
+
+    # There were no include entries defined
+    assert len(config) == 0
+
+    # More invalid data
+    result, config = ConfigBase.config_parse_text("""
+    # A tag without a url or group assignment
+    taga=
+
+    """)
+
+    # We expect to parse 0 entries from the above
+    assert isinstance(result, list)
+    assert len(result) == 0
+
+    # There were no include entries defined
+    assert len(config) == 0
+
+    result, config = ConfigBase.config_parse_text("""
+    # A tag without a url or group assignment
+    taga= %%INVALID
+    """)
+
+    # We expect to parse 0 entries from the above
+    assert isinstance(result, list)
+    assert len(result) == 0
+
+    # There were no include entries defined
+    assert len(config) == 0
+
+
+def test_config_base_config_parse_text_with_url():
+    """
+    API: ConfigBase.config_parse_text object_with_url
+
+    """
+    # Here is a similar result set however this one has an invalid line
+    # in it which invalidates the entire file
+    result, config = ConfigBase.config_parse_text("""
+    # Test a URL that has a URL as an argument
+    json://user:pass@localhost?+arg=http://example.com?arg2=1&arg3=3
+    """)
+
+    # No tag is parsed, but our URL successfully parses as is
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert len(result[0].tags) == 0
+
+    # Verify our URL is correctly captured
+    assert '%2Barg=http%3A%2F%2Fexample.com%3Farg2%3D1' in result[0].url()
+    assert 'json://user:pass@localhost/' in result[0].url()
+
+    # There were no include entries defined
+    assert len(config) == 0
+
+    # Pass in our configuration again
+    result, config = ConfigBase.config_parse_text(result[0].url())
+
+    # Verify that our results repeat themselves
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert len(result[0].tags) == 0
+    assert '%2Barg=http%3A%2F%2Fexample.com%3Farg2%3D1' in result[0].url()
+    assert 'json://user:pass@localhost/' in result[0].url()
+
     assert len(config) == 0
 
 
@@ -629,7 +853,7 @@ urls:
   - dbus://
 """, asset=asset)
 
-    # We expect to parse 3 entries from the above
+    # We expect to parse 2 entries from the above
     assert isinstance(result, list)
     assert len(result) == 2
 
@@ -663,7 +887,7 @@ urls:
         assert 'admin' in entry.tags
         assert 'devops' in entry.tags
 
-    # We expect to parse 3 entries from the above
+    # We expect to parse 2 entries from the above
     assert isinstance(result, list)
     assert len(result) == 2
 
@@ -688,7 +912,7 @@ urls:
         - entry
 """, asset=asset)
 
-    # We expect to parse 3 entries from the above
+    # We expect to parse 0 entries from the above
     assert isinstance(result, list)
     assert len(result) == 0
 
@@ -734,7 +958,7 @@ urls:
   - json://localhost:
 """, asset=asset)
 
-    # We expect to parse 3 entries from the above
+    # We expect to parse 1 entries from the above
     assert isinstance(result, list)
     assert len(result) == 1
 
@@ -756,9 +980,9 @@ urls:
     assert asset.theme == AppriseAsset().theme
 
     # Empty string assignment
-    assert isinstance(asset.image_url_mask, str) is True
+    assert isinstance(asset.image_url_mask, str)
     assert asset.image_url_mask == ""
-    assert isinstance(asset.image_url_logo, str) is True
+    assert isinstance(asset.image_url_logo, str)
     assert asset.image_url_logo == ""
 
     # For on-lookers looking through this file; here is a perfectly formatted
@@ -955,6 +1179,276 @@ def test_yaml_vs_text_tagging():
     assert isinstance(text_result[0], NotifyEmail)
     assert 'mytag' in text_result[0]
     assert 'mytag' in yaml_result[0]
+
+
+def test_config_base_config_tag_groups_yaml_01():
+    """
+    API: ConfigBase.config_tag_groups_yaml #1 object
+
+    """
+
+    # general reference used below
+    asset = AppriseAsset()
+
+    # Valid Configuration
+    result, config = ConfigBase.config_parse_yaml("""
+# if no version is specified then version 1 is presumed
+version: 1
+
+groups:
+  - group1: tagB, tagC, tagNotAssigned
+  - group2:
+      - tagA
+      - tagC
+  - group3:
+      - tagD: optional comment
+      - tagA: optional comment #2
+
+  # No assignment
+  - group4
+
+  # No assignment type 2
+  - group5:
+
+  # Integer assignment
+  - group6: 3
+  - group6: 3, 4, 5, test
+  - group6: 3.5, tagC
+
+  # Recursion
+  - groupA: groupB
+  - groupB: groupA
+  # And Again... (just because)
+  - groupA: groupB
+  - groupB: groupA
+
+  # Self assignment
+  - groupX: groupX
+
+  # Set up a larger recursive loop
+  - groupG: groupH
+  - groupH: groupI, groupJ
+  - groupI: groupJ, groupG
+  - groupJ: groupK, groupH, groupI
+  - groupK: groupG
+
+  # No tags assigned
+  - groupK: ",,  , ,"
+  - " , ": ",, , ,"
+
+  # Multi Assignments
+  - groupL, groupM: tagD, tagA
+  - 4, groupN:
+     - tagD
+     - tagE, TagA
+
+  # Add one more tag to groupL making it different then GroupM by 1
+  - groupL: tagB
+#
+# Define your notification urls:
+#
+urls:
+  - form://localhost:
+     - tag: tagA
+  - mailto://test:password@gmail.com:
+     - tag: tagB
+  - xml://localhost:
+     - tag: tagC
+  - json://localhost:
+     - tag: tagD, tagA
+
+""", asset=asset)
+
+    # We expect to parse 4 entries from the above
+    assert isinstance(result, list)
+    assert isinstance(config, list)
+    assert len(result) == 4
+
+    # Our first element is our group tags
+    assert len(result[0].tags) == 5
+    assert 'group2' in result[0].tags
+    assert 'group3' in result[0].tags
+    assert 'groupL' in result[0].tags
+    assert 'groupM' in result[0].tags
+    assert 'tagA' in result[0].tags
+
+    # No additional configuration is loaded
+    assert len(config) == 0
+
+    apobj = Apprise()
+    assert apobj.add(result)
+    # We match against 1 entry
+    assert len([x for x in apobj.find('tagA')]) == 2
+    assert len([x for x in apobj.find('tagB')]) == 1
+    assert len([x for x in apobj.find('tagC')]) == 1
+    assert len([x for x in apobj.find('tagD')]) == 1
+    assert len([x for x in apobj.find('group1')]) == 2
+    assert len([x for x in apobj.find('group2')]) == 3
+    assert len([x for x in apobj.find('group3')]) == 2
+    assert len([x for x in apobj.find('group4')]) == 0
+    assert len([x for x in apobj.find('group5')]) == 0
+    # json:// -- group6 -> 4 -> TagA
+    # xml://  -- group6 -> TagC
+    assert len([x for x in apobj.find('group6')]) == 2
+    assert len([x for x in apobj.find('4')]) == 1
+    assert len([x for x in apobj.find('groupN')]) == 1
+
+
+def test_config_base_config_tag_groups_yaml_02():
+    """
+    API: ConfigBase.config_tag_groups_yaml #2 object
+
+    """
+
+    # general reference used below
+    asset = AppriseAsset()
+
+    # Valid Configuration
+    result, config = ConfigBase.config_parse_yaml("""
+# if no version is specified then version 1 is presumed
+version: 1
+
+groups:
+  group1: tagB, tagC, tagNotAssigned
+  group2:
+    - tagA
+    - tagC
+  group3:
+    - tagD: optional comment
+    - tagA: optional comment #2
+
+  # No assignment type 2
+  group5:
+
+  # Integer assignment (since it's not a list, the last element prevails
+  # and replaces the above); '4' does not get appended as it would in
+  # the event this was a list instead
+  group6: 3
+  group6: 3, 4, 5, test
+  group6: 3.5, tagC
+
+  # Recursion
+  groupA: groupB
+  groupB: groupA
+  # And Again... (just because)
+  groupA: groupB
+  groupB: groupA
+
+  # Self assignment
+  groupX: groupX
+
+  # Set up a larger recursive loop
+  groupG: groupH
+  groupH: groupI, groupJ
+  groupI: groupJ, groupG
+  groupJ: groupK, groupH, groupI
+  groupK: groupG
+
+  # No tags assigned
+  groupK: ",,  , ,"
+  " , ": ",, , ,"
+
+  # Multi Assignments
+  groupL, groupM: tagD, tagA
+  4, groupN:
+   - tagD
+   - tagE, TagA
+
+  # Add one more tag to groupL making it different then GroupM by 1
+  groupL: tagB
+#
+# Define your notification urls:
+#
+urls:
+  - form://localhost:
+     - tag: tagA
+  - mailto://test:password@gmail.com:
+     - tag: tagB
+  - xml://localhost:
+     - tag: tagC
+  - json://localhost:
+     - tag: tagD, tagA
+
+""", asset=asset)
+
+    # We expect to parse 4 entries from the above
+    assert isinstance(result, list)
+    assert isinstance(config, list)
+    assert len(result) == 4
+
+    # Our first element is our group tags
+    assert len(result[0].tags) == 5
+    assert 'group2' in result[0].tags
+    assert 'group3' in result[0].tags
+    assert 'groupL' in result[0].tags
+    assert 'groupM' in result[0].tags
+    assert 'tagA' in result[0].tags
+
+    # No additional configuration is loaded
+    assert len(config) == 0
+
+    apobj = Apprise()
+    assert apobj.add(result)
+    # We match against 1 entry
+    assert len([x for x in apobj.find('tagA')]) == 2
+    assert len([x for x in apobj.find('tagB')]) == 1
+    assert len([x for x in apobj.find('tagC')]) == 1
+    assert len([x for x in apobj.find('tagD')]) == 1
+    assert len([x for x in apobj.find('group1')]) == 2
+    assert len([x for x in apobj.find('group2')]) == 3
+    assert len([x for x in apobj.find('group3')]) == 2
+    assert len([x for x in apobj.find('group4')]) == 0
+    assert len([x for x in apobj.find('group5')]) == 0
+    # NOT json:// -- group6 -> 4 -> TagA (not appended because dict storage)
+    #                          ^
+    #                          |
+    #            See: test_config_base_config_tag_groups_yaml_01 (above)
+    #                 dict storage (as this tests for) causes last entry to
+    #                 prevail; previous assignments are lost
+    #
+    # xml://  -- group6 -> TagC
+    assert len([x for x in apobj.find('group6')]) == 1
+    assert len([x for x in apobj.find('4')]) == 1
+    assert len([x for x in apobj.find('groupN')]) == 1
+    assert len([x for x in apobj.find('groupK')]) == 0
+
+
+def test_config_base_config_parse_yaml_globals():
+    """
+    API: ConfigBase.config_parse_yaml globals
+
+    """
+
+    # general reference used below
+    asset = AppriseAsset()
+
+    # Invalid Syntax (throws a ScannerError)
+    results, config = ConfigBase.config_parse_yaml(cleandoc("""
+    urls:
+      - jsons://localhost1:
+         - to: jeff@gmail.com
+           tag: jeff, customer
+           cto: 30
+           rto: 30
+           verify: no
+
+      - jsons://localhost2?cto=30&rto=30&verify=no:
+         - to: json@gmail.com
+           tag: json, customer
+    """), asset=asset)
+
+    # Invalid data gets us an empty result set
+    assert isinstance(results, list)
+
+    # Our results loaded
+    assert len(results) == 2
+    assert len(config) == 0
+
+    # Now verify that our global variables correctly initialized
+    for entry in results:
+        assert entry.verify_certificate is False
+        assert entry.socket_read_timeout == 30
+        assert entry.socket_connect_timeout == 30
 
 
 # This test fails on CentOS 8.x so it was moved into it's own function

@@ -14,6 +14,7 @@ __pycache__/
 env/
 .venv*
 build/
+BUILDROOT/
 develop-eggs/
 dist/
 downloads/
@@ -25,6 +26,11 @@ sdist/
 *.egg-info/
 .installed.cfg
 *.egg
+.local
+
+# Generated from Docker Instance
+.bash_history
+.python_history
 
 # Installer logs
 pip-log.txt
@@ -63,3 +69,4 @@ target/
 .project
 .pydevproject
 .settings
+.DS_Store

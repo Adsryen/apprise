@@ -1,33 +1,38 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+import asyncio
+import concurrent.futures
 import re
 import sys
 import pytest
 import requests
+from inspect import cleandoc
 from unittest import mock
 
 from os.path import dirname
@@ -43,17 +48,13 @@ from apprise import NotifyImageSize
 from apprise import __version__
 from apprise import URLBase
 from apprise import PrivacyMode
-from apprise.AppriseLocale import LazyTranslation
+from apprise.locale import LazyTranslation
+from apprise.locale import gettext_lazy as _
 
-from apprise import common
-from apprise.plugins import __load_matrix
-from apprise.plugins import __reset_matrix
-from apprise.utils import parse_list
+from apprise import NotificationManager
+from apprise.utils.parse import parse_list
+from helpers import OuterEventLoop
 import inspect
-
-# Sending notifications requires the coroutines to be awaited, so we need to
-# wrap the original function when mocking it.
-import apprise.py3compat.asyncio as py3aio
 
 # Disable logging for a cleaner testing output
 import logging
@@ -62,8 +63,11 @@ logging.disable(logging.CRITICAL)
 # Attachment Directory
 TEST_VAR_DIR = join(dirname(__file__), 'var')
 
+# Grant access to our Notification Manager Singleton
+N_MGR = NotificationManager()
 
-def test_apprise():
+
+def test_apprise_object():
     """
     API: Apprise() object
 
@@ -79,18 +83,15 @@ def test_apprise_async():
     API: Apprise() object asynchronous methods
 
     """
-    def do_notify(server, *args, **kwargs):
-        return py3aio.tosync(server.async_notify(*args, **kwargs))
+    with OuterEventLoop() as loop:
+        def do_notify(server, *args, **kwargs):
+            return loop.run_until_complete(
+                server.async_notify(*args, **kwargs))
 
-    apprise_test(do_notify)
+        apprise_test(do_notify)
 
 
 def apprise_test(do_notify):
-    # Caling load matix a second time which is an internal function causes it
-    # to skip over content already loaded into our matrix and thefore accesses
-    # other if/else parts of the code that aren't otherwise called
-    __load_matrix()
-
     a = Apprise()
 
     # no items
@@ -108,7 +109,7 @@ def apprise_test(do_notify):
 
     # We can load our servers up front as well
     servers = [
-        'faast://abcdefghijklmnop-abcdefg',
+        'json://myhost',
         'kodi://kodi.server.local',
     ]
 
@@ -174,9 +175,57 @@ def apprise_test(do_notify):
 
     # Clear our server listings again
     a.clear()
+    assert len(a) == 0
 
     # No servers to notify
     assert do_notify(a, title="my title", body="my body") is False
+
+    # More Variations of Multiple Adding of URLs
+    a = Apprise()
+    assert a.add(servers)
+    assert len(a) == 2
+    a.clear()
+
+    assert a.add('ntfys://user:pass@host/test, json://localhost')
+    assert len(a) == 2
+    a.clear()
+
+    assert a.add(['ntfys://user:pass@host/test', 'json://localhost'])
+    assert len(a) == 2
+    a.clear()
+
+    assert a.add(('ntfys://user:pass@host/test', 'json://localhost'))
+    assert len(a) == 2
+    a.clear()
+
+    assert a.add(set(['ntfys://user:pass@host/test', 'json://localhost']))
+    assert len(a) == 2
+    a.clear()
+
+    # Pass a list entry containing 1 string with 2 elements in it
+    # Mimic Home-Assistant core-2024.2.1 Issue:
+    #   - https://github.com/home-assistant/core/issues/110242
+    #
+    # In this case, the first one will load, but not the second entry
+    # This is by design; but captured here to illustrate the issue
+    assert a.add(['ntfys://user:pass@host/test, json://localhost'])
+    assert len(a) == 1
+    assert a[0].url().startswith('ntfys://')
+    a.clear()
+
+    # Following thorugh with the problem of providing a list containing
+    # an entry with 2 URLs in it... while the ntfys parsed okay above,
+    # the same can't be said for other combinations.  It's important
+    # to always keep strings separately
+    assert a.add(['mailto://user:pass@example.com, json://localhost']) is False
+    assert len(a) == 0
+
+    # Showing that the URLs were valid on their own:
+    assert a.add(*['mailto://user:pass@example.com, json://localhost'])
+    assert len(a) == 2
+    assert a[0].url().startswith('mailto://')
+    assert a[1].url().startswith('json://')
+    a.clear()
 
     class BadNotification(NotifyBase):
         def __init__(self, **kwargs):
@@ -184,10 +233,6 @@ def apprise_test(do_notify):
 
             # We fail whenever we're initialized
             raise TypeError()
-
-        def url(self, **kwargs):
-            # Support URL
-            return ''
 
         @staticmethod
         def parse_url(url, *args, **kwargs):
@@ -199,10 +244,6 @@ def apprise_test(do_notify):
             super().__init__(
                 notify_format=NotifyFormat.HTML, **kwargs)
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay
             return True
@@ -213,10 +254,10 @@ def apprise_test(do_notify):
             return NotifyBase.parse_url(url, verify_host=False)
 
     # Store our bad notification in our schema map
-    common.NOTIFY_SCHEMA_MAP['bad'] = BadNotification
+    N_MGR['bad'] = BadNotification
 
     # Store our good notification in our schema map
-    common.NOTIFY_SCHEMA_MAP['good'] = GoodNotification
+    N_MGR['good'] = GoodNotification
 
     # Just to explain what is happening here, we would have parsed the
     # url properly but failed when we went to go and create an instance
@@ -249,9 +290,11 @@ def apprise_test(do_notify):
     assert do_notify(a, title=object(), body=b'bytes') is False
     assert do_notify(a, title=b"bytes", body=object()) is False
 
-    # As long as one is present, we're good
+    # A Body must be present
+    assert do_notify(a, title='present', body=None) is False
+
+    # Other combinations work fine
     assert do_notify(a, title=None, body='present') is True
-    assert do_notify(a, title='present', body=None) is True
     assert do_notify(a, title="present", body="present") is True
 
     # Send Attachment with success
@@ -292,18 +335,18 @@ def apprise_test(do_notify):
             # Pretend everything is okay
             raise TypeError()
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
+        async def async_notify(self, **kwargs):
+            # Pretend everything is okay (async)
+            raise TypeError()
 
     class RuntimeNotification(NotifyBase):
         def notify(self, **kwargs):
             # Pretend everything is okay
             raise RuntimeError()
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
+        async def async_notify(self, **kwargs):
+            # Pretend everything is okay (async)
+            raise TypeError()
 
     class FailNotification(NotifyBase):
 
@@ -311,18 +354,18 @@ def apprise_test(do_notify):
             # Pretend everything is okay
             return False
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
+        async def async_notify(self, **kwargs):
+            # Pretend everything is okay (async)
+            raise TypeError()
 
     # Store our bad notification in our schema map
-    common.NOTIFY_SCHEMA_MAP['throw'] = ThrowNotification
+    N_MGR['throw'] = ThrowNotification
 
     # Store our good notification in our schema map
-    common.NOTIFY_SCHEMA_MAP['fail'] = FailNotification
+    N_MGR['fail'] = FailNotification
 
     # Store our good notification in our schema map
-    common.NOTIFY_SCHEMA_MAP['runtime'] = RuntimeNotification
+    N_MGR['runtime'] = RuntimeNotification
 
     for async_mode in (True, False):
         # Create an Asset object
@@ -346,11 +389,11 @@ def apprise_test(do_notify):
             # Pretend everything is okay
             raise TypeError()
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
+    N_MGR.unload_modules()
+    N_MGR['throw'] = ThrowInstantiateNotification
 
-    common.NOTIFY_SCHEMA_MAP['throw'] = ThrowInstantiateNotification
+    # Store our good notification in our schema map
+    N_MGR['good'] = GoodNotification
 
     # Reset our object
     a.clear()
@@ -372,6 +415,30 @@ def apprise_test(do_notify):
     # Reset our object
     a.clear()
     assert len(a) == 0
+
+    with pytest.raises(ValueError):
+        # Encoding error
+        AppriseAsset(encoding='ascii', storage_salt="ボールト")
+
+    with pytest.raises(ValueError):
+        # Not a valid storage salt (must be str or bytes)
+        AppriseAsset(storage_salt=42)
+
+    # Set our cache to be off
+    plugin = a.instantiate('good://localhost?store=no', asset=asset)
+    assert isinstance(plugin, NotifyBase)
+    assert plugin.url_id(lazy=False) is None
+    # Verify our cache is disabled
+    assert 'store=no' in plugin.url()
+
+    with pytest.raises(ValueError):
+        # idlen must be greater then 0
+        AppriseAsset(storage_idlen=-1)
+
+    # Create a larger idlen
+    asset = AppriseAsset(storage_idlen=32)
+    plugin = a.instantiate('good://localhost', asset=asset)
+    assert len(plugin.url_id()) == 32
 
     # Instantiate a bad object
     plugin = a.instantiate(object, tag="bad_object")
@@ -460,7 +527,7 @@ def apprise_test(do_notify):
     assert len(a) == 0
 
 
-def test_apprise_pretty_print(tmpdir):
+def test_apprise_pretty_print():
     """
     API: Apprise() Pretty Print tests
 
@@ -539,10 +606,12 @@ def test_apprise_tagging_async(mock_post, mock_get):
     API: Apprise() object tagging functionality asynchronous methods
 
     """
-    def do_notify(server, *args, **kwargs):
-        return py3aio.tosync(server.async_notify(*args, **kwargs))
+    with OuterEventLoop() as loop:
+        def do_notify(server, *args, **kwargs):
+            return loop.run_until_complete(
+                server.async_notify(*args, **kwargs))
 
-    apprise_tagging_test(mock_post, mock_get, do_notify)
+        apprise_tagging_test(mock_post, mock_get, do_notify)
 
 
 def apprise_tagging_test(mock_post, mock_get, do_notify):
@@ -655,16 +724,12 @@ def apprise_tagging_test(mock_post, mock_get, do_notify):
         tag=[(object, ), ]) is None
 
 
-def test_apprise_schemas(tmpdir):
+def test_apprise_schemas():
     """
     API: Apprise().schema() tests
 
     """
-    # Caling load matix a second time which is an internal function causes it
-    # to skip over content already loaded into our matrix and thefore accesses
-    # other if/else parts of the code that aren't otherwise called
-    __load_matrix()
-
+    # Clear loaded modules
     a = Apprise()
 
     # no items
@@ -691,15 +756,22 @@ def test_apprise_schemas(tmpdir):
 
         secure_protocol = 'markdowns'
 
-    # Store our notifications into our schema map
-    common.NOTIFY_SCHEMA_MAP['text'] = TextNotification
-    common.NOTIFY_SCHEMA_MAP['html'] = HtmlNotification
-    common.NOTIFY_SCHEMA_MAP['markdown'] = MarkDownNotification
-
     schemas = URLBase.schemas(TextNotification)
     assert isinstance(schemas, set) is True
     # We didn't define a protocol or secure protocol
     assert len(schemas) == 0
+
+    # Store our notifications into our schema map
+    N_MGR['text'] = TextNotification
+    N_MGR['html'] = HtmlNotification
+    N_MGR['markdown'] = MarkDownNotification
+
+    schemas = URLBase.schemas(TextNotification)
+    assert isinstance(schemas, set) is True
+    # We didn't define a protocol or secure protocol one
+    # but one got assigned in he above N_MGR call
+    assert len(schemas) == 1
+    assert 'text' in schemas
 
     schemas = URLBase.schemas(HtmlNotification)
     assert isinstance(schemas, set) is True
@@ -716,17 +788,193 @@ def test_apprise_schemas(tmpdir):
         assert len(schemas) == 0
 
 
-def test_apprise_notify_formats(tmpdir):
+def test_apprise_urlbase_object():
+    """
+    API: Apprise() URLBase object testing
+
+    """
+    results = URLBase.parse_url('https://localhost/path/?cto=3.0&verify=no')
+    assert results.get('user') is None
+    assert results.get('password') is None
+    assert results.get('path') == '/path/'
+    assert results.get('secure') is True
+    assert results.get('verify') is False
+    base = URLBase(**results)
+    assert base.request_timeout == (3.0, 4.0)
+    assert base.request_auth is None
+    assert base.request_url == 'https://localhost/path/'
+    assert base.url().startswith('https://localhost/')
+
+    results = URLBase.parse_url(
+        'http://user:pass@localhost:34/path/here?rto=3.0&verify=yes')
+    assert results.get('user') == 'user'
+    assert results.get('password') == 'pass'
+    assert results.get('fullpath') == '/path/here'
+    assert results.get('secure') is False
+    assert results.get('verify') is True
+    base = URLBase(**results)
+    assert base.request_timeout == (4.0, 3.0)
+    assert base.request_auth == ('user', 'pass')
+    assert base.request_url == 'http://localhost:34/path/here'
+    assert base.url().startswith('http://user:pass@localhost:34/path/here')
+
+    results = URLBase.parse_url('http://user@127.0.0.1/path/')
+    assert results.get('user') == 'user'
+    assert results.get('password') is None
+    assert results.get('fullpath') == '/path/'
+    assert results.get('secure') is False
+    assert results.get('verify') is True
+    base = URLBase(**results)
+    assert base.request_timeout == (4.0, 4.0)
+    assert base.request_auth == ('user', None)
+    assert base.request_url == 'http://127.0.0.1/path/'
+    assert base.url().startswith('http://user@127.0.0.1/path/')
+
+    # Generic initialization
+    base = URLBase(**{'schema': ''})
+    assert base.request_timeout == (4.0, 4.0)
+    assert base.request_auth is None
+    assert base.request_url == 'http:///'
+    assert base.url().startswith('http:///')
+
+    base = URLBase()
+    assert base.request_timeout == (4.0, 4.0)
+    assert base.request_auth is None
+    assert base.request_url == 'http:///'
+    assert base.url().startswith('http:///')
+
+
+def test_apprise_unique_id():
     """
     API: Apprise() Input Formats tests
 
     """
-    # Caling load matix a second time which is an internal function causes it
-    # to skip over content already loaded into our matrix and thefore accesses
-    # other if/else parts of the code that aren't otherwise called
-    __load_matrix()
 
-    a = Apprise()
+    # Default testing
+    obj1 = Apprise.instantiate('json://user@127.0.0.1/path')
+    obj2 = Apprise.instantiate('json://user@127.0.0.1/path/?arg=')
+
+    assert obj1.url_identifier == obj2.url_identifier
+    assert obj1.url_id() == obj2.url_id()
+    # Second call leverages lazy reference (so it's much faster
+    assert obj1.url_id() == obj2.url_id()
+    # Disable Lazy Setting
+    assert obj1.url_id(lazy=False) == obj2.url_id(lazy=False)
+
+    # A variation such as providing a password or altering the path makes the
+    # url_id() different:
+    obj2 = Apprise.instantiate('json://user@127.0.0.1/path2/?arg=')  # path
+    assert obj1.url_id() != obj2.url_id()
+    obj2 = Apprise.instantiate(
+        'jsons://user@127.0.0.1/path/?arg=')  # secure flag
+    assert obj1.url_id() != obj2.url_id()
+    obj2 = Apprise.instantiate(
+        'json://user2@127.0.0.1/path/?arg=')  # user
+    assert obj1.url_id() != obj2.url_id()
+    obj2 = Apprise.instantiate(
+        'json://user@127.0.0.1:8080/path/?arg=')  # port
+    assert obj1.url_id() != obj2.url_id()
+    obj2 = Apprise.instantiate(
+        'json://user:pass@127.0.0.1/path/?arg=')  # password
+    assert obj1.url_id() != obj2.url_id()
+
+    # Leverage salt setting
+    asset = AppriseAsset(storage_salt='abcd')
+
+    obj2 = Apprise.instantiate('json://user@127.0.0.1/path/', asset=asset)
+    assert obj1.url_id(lazy=False) != obj2.url_id(lazy=False)
+
+    asset = AppriseAsset(storage_salt=b'abcd')
+    # same salt value produces a match again
+    obj1 = Apprise.instantiate('json://user@127.0.0.1/path/', asset=asset)
+    assert obj1.url_id() == obj2.url_id()
+
+    # We'll add a good notification to our list
+    class TesNoURLID(NotifyBase):
+        """
+        This class is just sets a use case where we don't return a
+         url_identifier
+        """
+
+        # we'll use this as a key to make our service easier to find
+        # in the next part of the testing
+        service_name = 'nourl'
+
+        _url_identifier = False
+
+        def send(self, **kwargs):
+            # Pretend everything is okay (so we don't break other tests)
+            return True
+
+        @staticmethod
+        def parse_url(url):
+            return NotifyBase.parse_url(url, verify_host=False)
+
+        @property
+        def url_identifier(self):
+            """
+            No URL Identifier
+            """
+            return self._url_identifier
+
+    N_MGR['nourl'] = TesNoURLID
+
+    # setting URL Identifier to False disables the generator
+    url = 'nourl://'
+    obj = Apprise.instantiate(url)
+    # No generation takes place
+    assert obj.url_id() is None
+
+    #
+    # Dictionary Testing
+    #
+    obj._url_identifier = {
+        'abc': '123', 'def': b'\0', 'hij': 42, 'klm': object}
+    # call uses cached value (from above)
+    assert obj.url_id() is None
+    # Tests dictionary key generation
+    assert obj.url_id(lazy=False) is not None
+
+    # List/Set/Tuple Testing
+    #
+    obj1 = Apprise.instantiate(url)
+    obj1._url_identifier = ['123', b'\0', 42, object]
+    # Tests dictionary key generation
+    assert obj1.url_id() is not None
+
+    obj2 = Apprise.instantiate(url)
+    obj2._url_identifier = ('123', b'\0', 42, object)
+    assert obj2.url_id() is not None
+    assert obj2.url_id() == obj2.url_id()
+
+    obj3 = Apprise.instantiate(url)
+    obj3._url_identifier = set(['123', b'\0', 42, object])
+    assert obj3.url_id() is not None
+
+    obj = Apprise.instantiate(url)
+    obj._url_identifier = b'test'
+    assert obj.url_id() is not None
+
+    obj = Apprise.instantiate(url)
+    obj._url_identifier = 'test'
+    assert obj.url_id() is not None
+
+    # Testing Garbage
+    for x in (31, object, 43.1):
+        obj = Apprise.instantiate(url)
+        obj._url_identifier = x
+        assert obj.url_id() is not None
+
+
+def test_apprise_notify_formats():
+    """
+    API: Apprise() Input Formats tests
+
+    """
+    # Need to set async_mode=False to call notify() instead of async_notify().
+    asset = AppriseAsset(async_mode=False)
+
+    a = Apprise(asset=asset)
 
     # no items
     assert len(a) == 0
@@ -736,52 +984,38 @@ def test_apprise_notify_formats(tmpdir):
         notify_format = NotifyFormat.TEXT
 
         def __init__(self, **kwargs):
-            super().__init__()
+            super().__init__(**kwargs)
 
         def notify(self, **kwargs):
             # Pretend everything is okay
             return True
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
     class HtmlNotification(NotifyBase):
-
         # set our default notification format
         notify_format = NotifyFormat.HTML
 
         def __init__(self, **kwargs):
-            super().__init__()
+            super().__init__(**kwargs)
 
         def notify(self, **kwargs):
             # Pretend everything is okay
             return True
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
     class MarkDownNotification(NotifyBase):
-
         # set our default notification format
         notify_format = NotifyFormat.MARKDOWN
 
         def __init__(self, **kwargs):
-            super().__init__()
+            super().__init__(**kwargs)
 
         def notify(self, **kwargs):
             # Pretend everything is okay
             return True
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
     # Store our notifications into our schema map
-    common.NOTIFY_SCHEMA_MAP['text'] = TextNotification
-    common.NOTIFY_SCHEMA_MAP['html'] = HtmlNotification
-    common.NOTIFY_SCHEMA_MAP['markdown'] = MarkDownNotification
+    N_MGR['text'] = TextNotification
+    N_MGR['html'] = HtmlNotification
+    N_MGR['markdown'] = MarkDownNotification
 
     # Test Markdown; the above calls the markdown because our good://
     # defined plugin above was defined to default to HTML which triggers
@@ -843,6 +1077,18 @@ def test_apprise_asset(tmpdir):
     assert a.color(NotifyType.INFO, None) == '#3AA3E3'
     # None is the default
     assert a.color(NotifyType.INFO) == '#3AA3E3'
+
+    # Invalid Type
+    with pytest.raises(ValueError):
+        # The exception we expect since dict is not supported
+        a.color(NotifyType.INFO, dict)
+
+    # Test our ASCII mappings
+    assert a.ascii('invalid') == '[?]'
+    assert a.ascii(NotifyType.INFO) == '[i]'
+    assert a.ascii(NotifyType.SUCCESS) == '[+]'
+    assert a.ascii(NotifyType.WARNING) == '[~]'
+    assert a.ascii(NotifyType.FAILURE) == '[!]'
 
     # Invalid Type
     with pytest.raises(ValueError):
@@ -949,14 +1195,18 @@ def test_apprise_asset(tmpdir):
         extension='.test') == \
         'http://localhost/default/info-256x256.test'
 
+    a = AppriseAsset(plugin_paths=('/tmp',))
+    assert a.plugin_paths == ('/tmp', )
+
 
 def test_apprise_disabled_plugins():
     """
     API: Apprise() Disabled Plugin States
 
     """
-    # Reset our matrix
-    __reset_matrix()
+    # Ensure there are no other drives loaded
+    N_MGR.unload_modules(disable_native=True)
+    assert len(N_MGR) == 0
 
     class TestDisabled01Notification(NotifyBase):
         """
@@ -970,15 +1220,11 @@ def test_apprise_disabled_plugins():
         # in the next part of the testing
         service_name = 'na01'
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def notify(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['na01'] = TestDisabled01Notification
+    N_MGR['na01'] = TestDisabled01Notification
 
     class TestDisabled02Notification(NotifyBase):
         """
@@ -995,15 +1241,11 @@ def test_apprise_disabled_plugins():
             # enable state changes **AFTER** we initialize
             self.enabled = False
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def notify(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['na02'] = TestDisabled02Notification
+    N_MGR['na02'] = TestDisabled02Notification
 
     # Create our Apprise instance
     a = Apprise()
@@ -1053,15 +1295,11 @@ def test_apprise_disabled_plugins():
         # in the next part of the testing
         service_name = 'good'
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['good'] = TesEnabled01Notification
+    N_MGR['good'] = TesEnabled01Notification
 
     # The last thing we'll simulate is a case where the plugin is just
     # disabled at a later time long into it's life.  this is just to allow
@@ -1082,9 +1320,8 @@ def test_apprise_disabled_plugins():
     # our notifications will go okay now
     assert plugin.notify("My Message") is True
 
-    # Reset our matrix
-    __reset_matrix()
-    __load_matrix()
+    # Restore our modules
+    N_MGR.unload_modules()
 
 
 def test_apprise_details():
@@ -1092,9 +1329,6 @@ def test_apprise_details():
     API: Apprise() Details
 
     """
-    # Reset our matrix
-    __reset_matrix()
-
     # This is a made up class that is just used to verify
     class TestDetailNotification(NotifyBase):
         """
@@ -1124,22 +1358,23 @@ def test_apprise_details():
         # previously defined in the base package and builds onto them
         template_tokens = dict(NotifyBase.template_tokens, **{
             'notype': {
-                # Nothing defined is still valid
+                # name is a minimum requirement
+                'name': _('no type'),
             },
             'regex_test01': {
                 'name': _('RegexTest'),
                 'type': 'string',
-                'regex': r'[A-Z0-9]',
+                'regex': r'^[A-Z0-9]$',
             },
             'regex_test02': {
                 'name': _('RegexTest'),
                 # Support regex options too
-                'regex': (r'[A-Z0-9]', 'i'),
+                'regex': (r'^[A-Z0-9]$', 'i'),
             },
             'regex_test03': {
                 'name': _('RegexTest'),
                 # Support regex option without a second option
-                'regex': (r'[A-Z0-9]'),
+                'regex': (r'^[A-Z0-9]$'),
             },
             'regex_test04': {
                 # this entry would just end up getting removed
@@ -1192,16 +1427,12 @@ def test_apprise_details():
             }
         })
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
     # Store our good detail notification in our schema map
-    common.NOTIFY_SCHEMA_MAP['details'] = TestDetailNotification
+    N_MGR['details'] = TestDetailNotification
 
     # This is a made up class that is just used to verify
     class TestReq01Notification(NotifyBase):
@@ -1218,15 +1449,11 @@ def test_apprise_details():
             'packages_recommended': 'django',
         }
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['req01'] = TestReq01Notification
+    N_MGR['req01'] = TestReq01Notification
 
     # This is a made up class that is just used to verify
     class TestReq02Notification(NotifyBase):
@@ -1248,15 +1475,11 @@ def test_apprise_details():
             ]
         }
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['req02'] = TestReq02Notification
+    N_MGR['req02'] = TestReq02Notification
 
     # This is a made up class that is just used to verify
     class TestReq03Notification(NotifyBase):
@@ -1274,15 +1497,11 @@ def test_apprise_details():
             'packages_recommended': 'cryptography <= 3.4'
         }
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['req03'] = TestReq03Notification
+    N_MGR['req03'] = TestReq03Notification
 
     # This is a made up class that is just used to verify
     class TestReq04Notification(NotifyBase):
@@ -1294,15 +1513,11 @@ def test_apprise_details():
         # This is the same as saying there are no requirements
         requirements = None
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['req04'] = TestReq04Notification
+    N_MGR['req04'] = TestReq04Notification
 
     # This is a made up class that is just used to verify
     class TestReq05Notification(NotifyBase):
@@ -1316,15 +1531,11 @@ def test_apprise_details():
             'packages_recommended': 'cryptography <= 3.4'
         }
 
-        def url(self, **kwargs):
-            # Support URL
-            return ''
-
         def send(self, **kwargs):
             # Pretend everything is okay (so we don't break other tests)
             return True
 
-    common.NOTIFY_SCHEMA_MAP['req05'] = TestReq05Notification
+    N_MGR['req05'] = TestReq05Notification
 
     # Create our Apprise instance
     a = Apprise()
@@ -1352,7 +1563,8 @@ def test_apprise_details():
         assert 'details' in entry['requirements']
         assert 'packages_required' in entry['requirements']
         assert 'packages_recommended' in entry['requirements']
-        assert isinstance(entry['requirements']['details'], str)
+        assert isinstance(entry['requirements']['details'], (
+            str, LazyTranslation))
         assert isinstance(entry['requirements']['packages_required'], list)
         assert isinstance(entry['requirements']['packages_recommended'], list)
 
@@ -1379,13 +1591,10 @@ def test_apprise_details():
         assert 'details' in entry['requirements']
         assert 'packages_required' in entry['requirements']
         assert 'packages_recommended' in entry['requirements']
-        assert isinstance(entry['requirements']['details'], str)
+        assert isinstance(entry['requirements']['details'], (
+            str, LazyTranslation))
         assert isinstance(entry['requirements']['packages_required'], list)
         assert isinstance(entry['requirements']['packages_recommended'], list)
-
-    # Reset our matrix
-    __reset_matrix()
-    __load_matrix()
 
 
 def test_apprise_details_plugin_verification():
@@ -1393,11 +1602,7 @@ def test_apprise_details_plugin_verification():
     API: Apprise() Details Plugin Verification
 
     """
-
-    # Reset our matrix
-    __reset_matrix()
-    __load_matrix()
-
+    # Prepare our object
     a = Apprise()
 
     # Details object
@@ -1452,15 +1657,16 @@ def test_apprise_details_plugin_verification():
         # General Parameters
         'user', 'password', 'port', 'host', 'schema', 'fullpath',
         # NotifyBase parameters:
-        'format', 'overflow',
+        'format', 'overflow', 'emojis',
         # URLBase parameters:
-        'verify', 'cto', 'rto',
+        'verify', 'cto', 'rto', 'store',
     ])
 
     # Valid Schema Entries:
     valid_schema_keys = (
         'name', 'private', 'required', 'type', 'values', 'min', 'max',
         'regex', 'default', 'list', 'delim', 'prefix', 'map_to', 'alias_of',
+        'group',
     )
     for entry in details['schemas']:
 
@@ -1688,7 +1894,7 @@ def test_apprise_details_plugin_verification():
                                 )
 
         spec = inspect.getfullargspec(
-            common.NOTIFY_SCHEMA_MAP[protocols[0]].__init__)
+            N_MGR._schema_map[protocols[0]].__init__)
 
         function_args = \
             (set(parse_list(spec.varkw)) - set(['kwargs'])) \
@@ -1704,7 +1910,8 @@ def test_apprise_details_plugin_verification():
                     '{}.__init__() expects a {}=None entry according to '
                     'template configuration'
                     .format(
-                        common.NOTIFY_SCHEMA_MAP[protocols[0]].__name__, arg))
+                        N_MGR._schema_map
+                        [protocols[0]].__name__, arg))
 
         # Iterate over all of the function arguments and make sure that
         # it maps back to a key
@@ -1714,8 +1921,7 @@ def test_apprise_details_plugin_verification():
                 raise AssertionError(
                     '{}.__init__({}) found but not defined in the '
                     'template configuration'
-                    .format(
-                        common.NOTIFY_SCHEMA_MAP[protocols[0]].__name__, arg))
+                    .format(N_MGR._schema_map[protocols[0]].__name__, arg))
 
         # Iterate over our map_to_aliases and make sure they were defined in
         # either the as a token or arg
@@ -1756,8 +1962,10 @@ def test_apprise_details_plugin_verification():
 
 
 @mock.patch('requests.post')
-@mock.patch('apprise.py3compat.asyncio.notify', wraps=py3aio.notify)
-def test_apprise_async_mode(mock_async_notify, mock_post, tmpdir):
+@mock.patch('asyncio.gather', wraps=asyncio.gather)
+@mock.patch('concurrent.futures.ThreadPoolExecutor',
+            wraps=concurrent.futures.ThreadPoolExecutor)
+def test_apprise_async_mode(mock_threadpool, mock_gather, mock_post):
     """
     API: Apprise() async_mode tests
 
@@ -1790,9 +1998,9 @@ def test_apprise_async_mode(mock_async_notify, mock_post, tmpdir):
     # Send Notifications Asyncronously
     assert a.notify("async") is True
 
-    # Verify our async code got executed
-    assert mock_async_notify.call_count == 1
-    mock_async_notify.reset_mock()
+    # Verify our thread pool was created
+    assert mock_threadpool.call_count == 1
+    mock_threadpool.reset_mock()
 
     # Provide an over-ride now
     asset = AppriseAsset(async_mode=False)
@@ -1816,9 +2024,9 @@ def test_apprise_async_mode(mock_async_notify, mock_post, tmpdir):
 
     # Send Notifications Syncronously
     assert a.notify("sync") is True
-    # Verify our async code got called
-    assert mock_async_notify.call_count == 1
-    mock_async_notify.reset_mock()
+    # Sequential send doesn't require a gather
+    assert mock_gather.call_count == 0
+    mock_gather.reset_mock()
 
     # another way of looking a our false set asset configuration
     assert a[0].asset.async_mode is False
@@ -1839,9 +2047,9 @@ def test_apprise_async_mode(mock_async_notify, mock_post, tmpdir):
     # Send 1 Notification Syncronously, the other Asyncronously
     assert a.notify("a mixed batch") is True
 
-    # Verify our async code got called
-    assert mock_async_notify.call_count == 1
-    mock_async_notify.reset_mock()
+    # Verify we didn't use a thread pool for a single notification
+    assert mock_threadpool.call_count == 0
+    mock_threadpool.reset_mock()
 
 
 def test_notify_matrix_dynamic_importing(tmpdir):
@@ -1864,56 +2072,61 @@ def test_notify_matrix_dynamic_importing(tmpdir):
     base.join("__init__.py").write('')
 
     # Test no app_id
-    base.join('NotifyBadFile1.py').write(
+    base.join('NotifyBadFile1.py').write(cleandoc(
         """
-class NotifyBadFile1:
-    pass""")
+        class NotifyBadFile1:
+            pass
+        """))
 
     # No class of the same name
-    base.join('NotifyBadFile2.py').write(
+    base.join('NotifyBadFile2.py').write(cleandoc(
         """
-class BadClassName:
-    pass""")
+        class BadClassName:
+            pass
+        """))
 
     # Exception thrown
     base.join('NotifyBadFile3.py').write("""raise ImportError()""")
 
     # Utilizes a schema:// already occupied (as string)
-    base.join('NotifyGoober.py').write(
+    base.join('NotifyGoober.py').write(cleandoc(
         """
-from apprise import NotifyBase
-class NotifyGoober(NotifyBase):
-    # This class tests the fact we have a new class name, but we're
-    # trying to over-ride items previously used
+        from apprise import NotifyBase
+        class NotifyGoober(NotifyBase):
+            # This class tests the fact we have a new class name, but we're
+            # trying to over-ride items previously used
 
-    # The default simple (insecure) protocol (used by NotifyMail)
-    protocol = ('mailto', 'goober')
+            # The default simple (insecure) protocol (used by NotifyMail)
+            protocol = ('mailto', 'goober')
 
-    # The default secure protocol (used by NotifyMail)
-    secure_protocol = 'mailtos'
+            # The default secure protocol (used by NotifyMail)
+            secure_protocol = 'mailtos'
 
-    @staticmethod
-    def parse_url(url, *args, **kwargs):
-        # always parseable
-        return ConfigBase.parse_url(url, verify_host=False)""")
+            @staticmethod
+            def parse_url(url, *args, **kwargs):
+                # always parseable
+                return ConfigBase.parse_url(url, verify_host=False)
+        """))
 
     # Utilizes a schema:// already occupied (as tuple)
-    base.join('NotifyBugger.py').write("""
-from apprise import NotifyBase
-class NotifyBugger(NotifyBase):
-    # This class tests the fact we have a new class name, but we're
-    # trying to over-ride items previously used
+    base.join('NotifyBugger.py').write(cleandoc(
+        """
+        from apprise import NotifyBase
+        class NotifyBugger(NotifyBase):
+            # This class tests the fact we have a new class name, but we're
+            # trying to over-ride items previously used
 
-    # The default simple (insecure) protocol (used by NotifyMail), the other
-    # isn't
-    protocol = ('mailto', 'bugger-test' )
+            # The default simple (insecure) protocol (used by NotifyMail), the
+            # other isn't
+            protocol = ('mailto', 'bugger-test' )
 
-    # The default secure protocol (used by NotifyMail), the other isn't
-    secure_protocol = ('mailtos', ['garbage'])
+            # The default secure protocol (used by NotifyMail), the other isn't
+            secure_protocol = ('mailtos', ['garbage'])
 
-    @staticmethod
-    def parse_url(url, *args, **kwargs):
-        # always parseable
-        return ConfigBase.parse_url(url, verify_host=False)""")
+            @staticmethod
+            def parse_url(url, *args, **kwargs):
+                # always parseable
+                return ConfigBase.parse_url(url, verify_host=False)
+            """))
 
-    __load_matrix(path=str(base), name=module_name)
+    N_MGR.load_modules(path=str(base), name=module_name)

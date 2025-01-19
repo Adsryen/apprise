@@ -1,38 +1,40 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 from unittest import mock
 
-import sys
 import json
 import requests
 import pytest
 from apprise import Apprise
 from apprise import AppriseConfig
 from apprise import NotifyType
-from apprise.plugins.NotifyMSTeams import NotifyMSTeams
+from apprise.plugins.msteams import NotifyMSTeams
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -90,6 +92,15 @@ apprise_url_tests = (
 
          # Our expected url(privacy=True) startswith() response (v2 format):
          'privacy_url': 'msteams://myteam/8...2/m...m/8...2/'}),
+    # Support Newer Native URLs with 4 tokens, introduced in 2025
+    ('https://myteam.webhook.office.com/webhookb2/{}@{}/IncomingWebhook/{}/{}'
+     '/{}'
+     .format(UUID4, UUID4, 'm' * 32, UUID4, 'V2-_' + 'n' * 43), {
+         # All tokens provided - we're good
+         'instance': NotifyMSTeams,
+
+         # Our expected url(privacy=True) startswith() response (v2 format):
+         'privacy_url': 'msteams://myteam/8...2/m...m/8...2/V...n'}),
 
     # Legacy URL Formatting
     ('msteams://{}@{}/{}/{}?t2'.format(UUID4, UUID4, 'c' * 32, UUID4), {
@@ -175,21 +186,50 @@ def test_plugin_msteams_urls():
     AppriseURLTester(tests=apprise_url_tests).run_all()
 
 
-@mock.patch('requests.post')
-def test_plugin_msteams_templating(mock_post, tmpdir):
-    """
-    NotifyMSTeams() Templating
+@pytest.fixture
+def msteams_url():
+    return 'msteams://{}@{}/{}/{}'.format(UUID4, UUID4, 'a' * 32, UUID4)
 
-    """
 
-    # Prepare Mock
+@pytest.fixture
+def request_mock(mocker):
+    """
+    Prepare requests mock.
+    """
+    mock_post = mocker.patch("requests.post")
     mock_post.return_value = requests.Request()
     mock_post.return_value.status_code = requests.codes.ok
+    return mock_post
 
-    uuid4 = '8b799edf-6f98-4d3a-9be7-2862fb4e5752'
-    url = 'msteams://{}@{}/{}/{}'.format(uuid4, uuid4, 'a' * 32, uuid4)
 
-    # Test cases where our URL is invalid
+@pytest.fixture
+def simple_template(tmpdir):
+    template = tmpdir.join("simple.json")
+    template.write("""
+    {
+      "@type": "MessageCard",
+      "@context": "https://schema.org/extensions",
+      "summary": "{{name}}",
+      "themeColor": "{{app_color}}",
+      "sections": [
+        {
+          "activityImage": null,
+          "activityTitle": "{{title}}",
+          "text": "{{body}}"
+        }
+      ]
+    }
+    """)
+    return template
+
+
+def test_plugin_msteams_templating_basic_success(
+        request_mock, msteams_url, tmpdir):
+    """
+    NotifyMSTeams() Templating - success.
+    Test cases where URL and JSON is valid.
+    """
+
     template = tmpdir.join("simple.json")
     template.write("""
     {
@@ -209,7 +249,7 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
 
     # Instantiate our URL
     obj = Apprise.instantiate('{url}/?template={template}&{kwargs}'.format(
-        url=url,
+        url=msteams_url,
         template=str(template),
         kwargs=':key1=token&:key2=token',
     ))
@@ -219,27 +259,31 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Apprise'
     assert posted_json['themeColor'] == '#3AA3E3'
     assert posted_json['sections'][0]['activityTitle'] == 'title'
     assert posted_json['sections'][0]['text'] == 'body'
 
-    # Test invalid JSON
 
-    # Test cases where our URL is invalid
+def test_plugin_msteams_templating_invalid_json(
+        request_mock, msteams_url, tmpdir):
+    """
+    NotifyMSTeams() Templating - invalid JSON.
+    """
+
     template = tmpdir.join("invalid.json")
     template.write("}")
 
     # Instantiate our URL
     obj = Apprise.instantiate('{url}/?template={template}&{kwargs}'.format(
-        url=url,
+        url=msteams_url,
         template=str(template),
         kwargs=':key1=token&:key2=token',
     ))
@@ -250,7 +294,14 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is False
 
-    # Test cases where we're missing the @type part of the URL
+
+def test_plugin_msteams_templating_json_missing_type(
+        request_mock, msteams_url, tmpdir):
+    """
+    NotifyMSTeams() Templating - invalid JSON.
+    Test case where we're missing the @type part of the URL.
+    """
+
     template = tmpdir.join("missing_type.json")
     template.write("""
     {
@@ -269,7 +320,7 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
 
     # Instantiate our URL
     obj = Apprise.instantiate('{url}/?template={template}&{kwargs}'.format(
-        url=url,
+        url=msteams_url,
         template=str(template),
         kwargs=':key1=token&:key2=token',
     ))
@@ -281,7 +332,14 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is False
 
-    # Test cases where we're missing the @context part of the URL
+
+def test_plugin_msteams_templating_json_missing_context(
+        request_mock, msteams_url, tmpdir):
+    """
+    NotifyMSTeams() Templating - invalid JSON.
+    Test cases where we're missing the @context part of the URL.
+    """
+
     template = tmpdir.join("missing_context.json")
     template.write("""
     {
@@ -300,18 +358,33 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
 
     # Instantiate our URL
     obj = Apprise.instantiate('{url}/?template={template}&{kwargs}'.format(
-        url=url,
+        url=msteams_url,
         template=str(template),
         kwargs=':key1=token&:key2=token',
     ))
-
     assert isinstance(obj, NotifyMSTeams)
+
     # We can not load the file because we're missing the @context entry
     assert obj.notify(
         body="body", title='title',
         notify_type=NotifyType.INFO) is False
 
-    # Test a case where we can not access the file:
+
+def test_plugin_msteams_templating_load_json_failure(
+        request_mock, msteams_url, tmpdir):
+    """
+    NotifyMSTeams() Templating - template loading failure.
+    Test a case where we can not access the file.
+    """
+
+    template = tmpdir.join("empty.json")
+    template.write("")
+
+    obj = Apprise.instantiate('{url}/?template={template}'.format(
+        url=msteams_url,
+        template=str(template),
+    ))
+
     with mock.patch('json.loads', side_effect=OSError):
         # we fail, but this time it's because we couldn't
         # access the cached file contents for reading
@@ -319,8 +392,14 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
             body="body", title='title',
             notify_type=NotifyType.INFO) is False
 
-    # A more complicated example; uses a target
-    mock_post.reset_mock()
+
+def test_plugin_msteams_templating_target_success(
+        request_mock, msteams_url, tmpdir):
+    """
+    NotifyMSTeams() Templating - success with target.
+    A more complicated example; uses a target.
+    """
+
     template = tmpdir.join("more_complicated_example.json")
     template.write("""
     {
@@ -355,7 +434,7 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
 
     # Instantiate our URL
     obj = Apprise.instantiate('{url}/?template={template}&{kwargs}'.format(
-        url=url,
+        url=msteams_url,
         template=str(template),
         kwargs=':key1=token&:key2=token&:target=http://localhost',
     ))
@@ -365,12 +444,12 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Apprise Notifications'
     assert posted_json['themeColor'] == '#3AA3E3'
@@ -382,41 +461,12 @@ def test_plugin_msteams_templating(mock_post, tmpdir):
         == 'http://localhost'
 
 
-@pytest.mark.skipif(
-    hasattr(sys, "pypy_version_info"), reason="Does not work reliably on PyPy")
-@mock.patch('requests.post')
-def test_msteams_yaml_config(mock_post, tmpdir):
+def test_msteams_yaml_config_invalid_template_filename(
+        request_mock, msteams_url, simple_template, tmpdir):
     """
-    NotifyMSTeams() YAML Configuration Entries
-
+    NotifyMSTeams() YAML Configuration Entries - invalid template filename.
     """
 
-    # Prepare Mock
-    mock_post.return_value = requests.Request()
-    mock_post.return_value.status_code = requests.codes.ok
-
-    uuid4 = '8b799edf-6f98-4d3a-9be7-2862fb4e5752'
-    url = 'msteams://{}@{}/{}/{}'.format(uuid4, uuid4, 'a' * 32, uuid4)
-
-    # Test cases where our URL is invalid
-    template = tmpdir.join("simple.json")
-    template.write("""
-    {
-      "@type": "MessageCard",
-      "@context": "https://schema.org/extensions",
-      "summary": "{{name}}",
-      "themeColor": "{{app_color}}",
-      "sections": [
-        {
-          "activityImage": null,
-          "activityTitle": "{{title}}",
-          "text": "{{body}}"
-        }
-      ]
-    }
-    """)
-
-    # Test Invalid Filename
     config = tmpdir.join("msteams01.yml")
     config.write("""
     urls:
@@ -426,7 +476,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
           :name: 'Template.Missing'
           :body: 'test body'
           :title: 'test title'
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))
@@ -438,9 +488,15 @@ def test_msteams_yaml_config(mock_post, tmpdir):
     assert obj.notify(
         body="body", title='title',
         notify_type=NotifyType.INFO) is False
-    assert mock_post.called is False
+    assert request_mock.called is False
 
-    # Test token identifiers
+
+def test_msteams_yaml_config_token_identifiers(
+        request_mock, msteams_url, simple_template, tmpdir):
+    """
+    NotifyMSTeams() YAML Configuration Entries - test token identifiers.
+    """
+
     config = tmpdir.join("msteams01.yml")
     config.write("""
     urls:
@@ -450,7 +506,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
           :name: 'Testing'
           :body: 'test body'
           :title: 'test title'
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))
@@ -463,22 +519,26 @@ def test_msteams_yaml_config(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Testing'
     assert posted_json['themeColor'] == '#3AA3E3'
     assert posted_json['sections'][0]['activityTitle'] == 'test title'
     assert posted_json['sections'][0]['text'] == 'test body'
 
-    #
-    # Now again but without a bullet under the url definition
-    #
-    mock_post.reset_mock()
+
+def test_msteams_yaml_config_no_bullet_under_url_1(
+        request_mock, msteams_url, simple_template, tmpdir):
+    """
+    NotifyMSTeams() YAML Configuration Entries - no bullet 1.
+    Now again but without a bullet under the url definition.
+    """
+
     config = tmpdir.join("msteams02.yml")
     config.write("""
     urls:
@@ -488,7 +548,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
           :name: 'Testing2'
           :body: 'test body2'
           :title: 'test title2'
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))
@@ -501,22 +561,26 @@ def test_msteams_yaml_config(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Testing2'
     assert posted_json['themeColor'] == '#3AA3E3'
     assert posted_json['sections'][0]['activityTitle'] == 'test title2'
     assert posted_json['sections'][0]['text'] == 'test body2'
 
-    #
-    # Try again but store the content as a dictionary in the cofiguration file
-    #
-    mock_post.reset_mock()
+
+def test_msteams_yaml_config_dictionary_file(
+        request_mock, msteams_url, simple_template, tmpdir):
+    """
+    NotifyMSTeams() YAML Configuration Entries.
+    Try again but store the content as a dictionary in the configuration file.
+    """
+
     config = tmpdir.join("msteams03.yml")
     config.write("""
     urls:
@@ -527,7 +591,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
             name: 'Testing3'
             body: 'test body3'
             title: 'test title3'
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))
@@ -540,22 +604,26 @@ def test_msteams_yaml_config(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Testing3'
     assert posted_json['themeColor'] == '#3AA3E3'
     assert posted_json['sections'][0]['activityTitle'] == 'test title3'
     assert posted_json['sections'][0]['text'] == 'test body3'
 
-    #
-    # Now again but without a bullet under the url definition
-    #
-    mock_post.reset_mock()
+
+def test_msteams_yaml_config_no_bullet_under_url_2(
+        request_mock, msteams_url, simple_template, tmpdir):
+    """
+    NotifyMSTeams() YAML Configuration Entries - no bullet 2.
+    Now again but without a bullet under the url definition.
+    """
+
     config = tmpdir.join("msteams04.yml")
     config.write("""
     urls:
@@ -566,7 +634,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
             name: 'Testing4'
             body: 'test body4'
             title: 'test title4'
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))
@@ -579,20 +647,26 @@ def test_msteams_yaml_config(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Testing4'
     assert posted_json['themeColor'] == '#3AA3E3'
     assert posted_json['sections'][0]['activityTitle'] == 'test title4'
     assert posted_json['sections'][0]['text'] == 'test body4'
 
-    # Now let's do a combination of the two
-    mock_post.reset_mock()
+
+def test_msteams_yaml_config_combined(
+        request_mock, msteams_url, simple_template, tmpdir):
+    """
+    NotifyMSTeams() YAML Configuration Entries.
+    Now let's do a combination of the two.
+    """
+
     config = tmpdir.join("msteams05.yml")
     config.write("""
     urls:
@@ -603,7 +677,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
               body: 'test body5'
               title: 'test title5'
           :name: 'Testing5'
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))
@@ -616,21 +690,27 @@ def test_msteams_yaml_config(mock_post, tmpdir):
         body="body", title='title',
         notify_type=NotifyType.INFO) is True
 
-    assert mock_post.called is True
-    assert mock_post.call_args_list[0][0][0].startswith(
+    assert request_mock.called is True
+    assert request_mock.call_args_list[0][0][0].startswith(
         'https://outlook.office.com/webhook/')
 
     # Our Posted JSON Object
-    posted_json = json.loads(mock_post.call_args_list[0][1]['data'])
+    posted_json = json.loads(request_mock.call_args_list[0][1]['data'])
     assert 'summary' in posted_json
     assert posted_json['summary'] == 'Testing5'
     assert posted_json['themeColor'] == '#3AA3E3'
     assert posted_json['sections'][0]['activityTitle'] == 'test title5'
     assert posted_json['sections'][0]['text'] == 'test body5'
 
-    # Now let's do a test where our tokens is not the expected
-    # dictionary we want to see
-    mock_post.reset_mock()
+
+def test_msteams_yaml_config_token_mismatch(
+        request_mock, msteams_url, simple_template, tmpdir):
+    """
+    NotifyMSTeams() YAML Configuration Entries.
+    Now let's do a test where our tokens is not the
+    expected dictionary we want to see.
+    """
+
     config = tmpdir.join("msteams06.yml")
     config.write("""
     urls:
@@ -640,7 +720,7 @@ def test_msteams_yaml_config(mock_post, tmpdir):
           # Not a dictionary
           tokens:
             body
-    """.format(url=url, template=str(template)))
+    """.format(url=msteams_url, template=str(simple_template)))
 
     cfg = AppriseConfig()
     cfg.add(str(config))

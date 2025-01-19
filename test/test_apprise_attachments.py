@@ -1,38 +1,43 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
-import sys
 import pytest
+import json
+import requests
+from unittest import mock
 from os.path import getsize
 from os.path import join
 from os.path import dirname
-from apprise.AppriseAttachment import AppriseAttachment
-from apprise.AppriseAsset import AppriseAsset
-from apprise.attachment.AttachBase import AttachBase
-from apprise.common import ATTACHMENT_SCHEMA_MAP
-from apprise.attachment import __load_matrix
+from inspect import cleandoc
+from apprise import Apprise, AppriseAsset
+from apprise import AttachmentManager
+from apprise.apprise_attachment import AppriseAttachment
+from apprise.attachment import AttachBase
 from apprise.common import ContentLocation
 
 # Disable logging for a cleaner testing output
@@ -40,6 +45,9 @@ import logging
 logging.disable(logging.CRITICAL)
 
 TEST_VAR_DIR = join(dirname(__file__), 'var')
+
+# Grant access to our Attachment Manager Singleton
+A_MGR = AttachmentManager()
 
 
 def test_apprise_attachment():
@@ -256,6 +264,77 @@ def test_apprise_attachment():
     assert aa.size() == 0
 
 
+@mock.patch('requests.get')
+def test_apprise_attachment_truncate(mock_get):
+    """
+    API: AppriseAttachment when truncation in place
+
+    """
+
+    # Prepare our response
+    response = requests.Request()
+    response.status_code = requests.codes.ok
+
+    # Prepare Mock
+    mock_get.return_value = response
+
+    # our Apprise Object
+    ap_obj = Apprise()
+
+    # Add ourselves an object set to truncate
+    ap_obj.add('json://localhost/?method=GET&overflow=truncate')
+
+    # Create ourselves an attachment object
+    aa = AppriseAttachment()
+
+    # There are no attachents loaded
+    assert len(aa) == 0
+
+    # Object can be directly checked as a boolean; response is False
+    # when there are no entries loaded
+    assert not aa
+
+    # Add 2 attachments
+    assert aa.add(join(TEST_VAR_DIR, 'apprise-test.gif'))
+    assert aa.add(join(TEST_VAR_DIR, 'apprise-test.png'))
+
+    assert mock_get.call_count == 0
+    assert ap_obj.notify(body='body', title='title', attach=aa)
+
+    assert mock_get.call_count == 1
+
+    # Our first item was truncated, so only 1 attachment
+    details = mock_get.call_args_list[0]
+    dataset = json.loads(details[1]['data'])
+    assert len(dataset['attachments']) == 1
+
+    # Reset our object
+    mock_get.reset_mock()
+
+    # our Apprise Object
+    ap_obj = Apprise()
+
+    # Add ourselves an object set to upstream
+    ap_obj.add('json://localhost/?method=GET&overflow=upstream')
+
+    # Create ourselves an attachment object
+    aa = AppriseAttachment()
+
+    # Add 2 attachments
+    assert aa.add(join(TEST_VAR_DIR, 'apprise-test.gif'))
+    assert aa.add(join(TEST_VAR_DIR, 'apprise-test.png'))
+
+    assert mock_get.call_count == 0
+    assert ap_obj.notify(body='body', title='title', attach=aa)
+
+    assert mock_get.call_count == 1
+
+    # Our item was not truncated, so all attachments
+    details = mock_get.call_args_list[0]
+    dataset = json.loads(details[1]['data'])
+    assert len(dataset['attachments']) == 2
+
+
 def test_apprise_attachment_instantiate():
     """
     API: AppriseAttachment.instantiate()
@@ -275,7 +354,7 @@ def test_apprise_attachment_instantiate():
             raise TypeError()
 
     # Store our bad attachment type in our schema map
-    ATTACHMENT_SCHEMA_MAP['bad'] = BadAttachType
+    A_MGR['bad'] = BadAttachType
 
     with pytest.raises(TypeError):
         AppriseAttachment.instantiate(
@@ -284,77 +363,6 @@ def test_apprise_attachment_instantiate():
     # Same call but exceptions suppressed
     assert AppriseAttachment.instantiate(
         'bad://path', suppress_exceptions=True) is None
-
-
-def test_apprise_attachment_matrix_load():
-    """
-    API: AppriseAttachment() matrix initialization
-
-    """
-
-    import apprise
-
-    class AttachmentDummy(AttachBase):
-        """
-        A dummy wrapper for testing the different options in the load_matrix
-        function
-        """
-
-        # The default descriptive name associated with the Notification
-        service_name = 'dummy'
-
-        # protocol as tuple
-        protocol = ('uh', 'oh')
-
-        # secure protocol as tuple
-        secure_protocol = ('no', 'yes')
-
-    class AttachmentDummy2(AttachBase):
-        """
-        A dummy wrapper for testing the different options in the load_matrix
-        function
-        """
-
-        # The default descriptive name associated with the Notification
-        service_name = 'dummy2'
-
-        # secure protocol as tuple
-        secure_protocol = ('true', 'false')
-
-    class AttachmentDummy3(AttachBase):
-        """
-        A dummy wrapper for testing the different options in the load_matrix
-        function
-        """
-
-        # The default descriptive name associated with the Notification
-        service_name = 'dummy3'
-
-        # secure protocol as string
-        secure_protocol = 'true'
-
-    class AttachmentDummy4(AttachBase):
-        """
-        A dummy wrapper for testing the different options in the load_matrix
-        function
-        """
-
-        # The default descriptive name associated with the Notification
-        service_name = 'dummy4'
-
-        # protocol as string
-        protocol = 'true'
-
-    # Generate ourselves a fake entry
-    apprise.attachment.AttachmentDummy = AttachmentDummy
-    apprise.attachment.AttachmentDummy2 = AttachmentDummy2
-    apprise.attachment.AttachmentDummy3 = AttachmentDummy3
-    apprise.attachment.AttachmentDummy4 = AttachmentDummy4
-
-    __load_matrix()
-
-    # Call it again so we detect our entries already loaded
-    __load_matrix()
 
 
 def test_attachment_matrix_dynamic_importing(tmpdir):
@@ -369,53 +377,55 @@ def test_attachment_matrix_dynamic_importing(tmpdir):
 
     module_name = 'badattach'
 
-    # Update our path to point to our new test suite
-    sys.path.insert(0, str(suite))
-
     # Create a base area to work within
     base = suite.mkdir(module_name)
     base.join("__init__.py").write('')
 
     # Test no app_id
-    base.join('AttachBadFile1.py').write(
+    base.join('AttachBadFile1.py').write(cleandoc(
         """
-class AttachBadFile1:
-    pass""")
+        class AttachBadFile1:
+            pass
+        """))
 
     # No class of the same name
-    base.join('AttachBadFile2.py').write(
+    base.join('AttachBadFile2.py').write(cleandoc(
         """
-class BadClassName:
-    pass""")
+        class BadClassName:
+            pass
+        """))
 
     # Exception thrown
     base.join('AttachBadFile3.py').write("""raise ImportError()""")
 
     # Utilizes a schema:// already occupied (as string)
-    base.join('AttachGoober.py').write(
+    base.join('AttachGoober.py').write(cleandoc(
         """
-from apprise import AttachBase
-class AttachGoober(AttachBase):
-    # This class tests the fact we have a new class name, but we're
-    # trying to over-ride items previously used
+        from apprise import AttachBase
+        class AttachGoober(AttachBase):
+            # This class tests the fact we have a new class name, but we're
+            # trying to over-ride items previously used
 
-    # The default simple (insecure) protocol
-    protocol = 'http'
+            # The default simple (insecure) protocol
+            protocol = 'http'
 
-    # The default secure protocol
-    secure_protocol = 'https'""")
+            # The default secure protocol
+            secure_protocol = 'https'
+        """))
 
     # Utilizes a schema:// already occupied (as tuple)
-    base.join('AttachBugger.py').write("""
-from apprise import AttachBase
-class AttachBugger(AttachBase):
-    # This class tests the fact we have a new class name, but we're
-    # trying to over-ride items previously used
+    base.join('AttachBugger.py').write(cleandoc(
+        """
+        from apprise import AttachBase
+        class AttachBugger(AttachBase):
+            # This class tests the fact we have a new class name, but we're
+            # trying to over-ride items previously used
 
-    # The default simple (insecure) protocol
-    protocol = ('http', 'bugger-test' )
+            # The default simple (insecure) protocol
+            protocol = ('http', 'bugger-test' )
 
-    # The default secure protocol
-    secure_protocol = ('https', 'bugger-tests')""")
+            # The default secure protocol
+            secure_protocol = ('https', 'bugger-tests')
+        """))
 
-    __load_matrix(path=str(base), name=module_name)
+    A_MGR.load_modules(path=str(base), name=module_name)

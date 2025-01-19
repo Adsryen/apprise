@@ -1,21 +1,21 @@
 # Translations template for apprise.
-# Copyright (C) 2022 Chris Caron
+# Copyright (C) 2025 Chris Caron
 # This file is distributed under the same license as the apprise project.
-# FIRST AUTHOR <EMAIL@ADDRESS>, 2022.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2025.
 #
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: apprise 1.1.0\n"
+"Project-Id-Version: apprise 1.9.2\n"
 "Report-Msgid-Bugs-To: lead2gold@gmail.com\n"
-"POT-Creation-Date: 2022-10-08 14:03-0400\n"
+"POT-Creation-Date: 2025-01-08 21:02-0500\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.9.1\n"
+"Generated-By: Babel 2.16.0\n"
 
 msgid "A local Gnome environment is required."
 msgstr ""
@@ -23,10 +23,19 @@ msgstr ""
 msgid "A local Microsoft Windows environment is required."
 msgstr ""
 
+msgid "API Access Token"
+msgstr ""
+
 msgid "API Key"
 msgstr ""
 
 msgid "API Secret"
+msgstr ""
+
+msgid "API Token"
+msgstr ""
+
+msgid "API Version"
 msgstr ""
 
 msgid "Access Key"
@@ -41,10 +50,16 @@ msgstr ""
 msgid "Access Token"
 msgstr ""
 
-msgid "Account Email"
+msgid "Account Email or Object ID"
 msgstr ""
 
 msgid "Account SID"
+msgstr ""
+
+msgid "Action"
+msgstr ""
+
+msgid "Action Mapping"
 msgstr ""
 
 msgid "Add Tokens"
@@ -65,6 +80,12 @@ msgstr ""
 msgid "App ID"
 msgstr ""
 
+msgid "App Token"
+msgstr ""
+
+msgid "App User Name"
+msgstr ""
+
 msgid "App Version"
 msgstr ""
 
@@ -80,7 +101,13 @@ msgstr ""
 msgid "Attach"
 msgstr ""
 
+msgid "Attach File As"
+msgstr ""
+
 msgid "Attach Filename"
+msgstr ""
+
+msgid "Auth ID"
 msgstr ""
 
 msgid "Auth Token"
@@ -89,7 +116,7 @@ msgstr ""
 msgid "Authentication Key"
 msgstr ""
 
-msgid "Authorization Token"
+msgid "Authentication Type"
 msgstr ""
 
 msgid "Avatar Image"
@@ -113,6 +140,9 @@ msgstr ""
 msgid "Bot Token"
 msgstr ""
 
+msgid "Bot Webhook Key"
+msgstr ""
+
 msgid "Cache Age"
 msgstr ""
 
@@ -126,6 +156,12 @@ msgid "Carbon Copy"
 msgstr ""
 
 msgid "Category"
+msgstr ""
+
+msgid "Chanify"
+msgstr ""
+
+msgid "Channel ID"
 msgstr ""
 
 msgid "Channels"
@@ -152,10 +188,16 @@ msgstr ""
 msgid "Consumer Secret"
 msgstr ""
 
+msgid "Content Placement"
+msgstr ""
+
 msgid "Country"
 msgstr ""
 
 msgid "Currency"
+msgstr ""
+
+msgid "Custom Data"
 msgstr ""
 
 msgid "Custom Details"
@@ -174,6 +216,9 @@ msgid "DBus Notification"
 msgstr ""
 
 msgid "Data Entries"
+msgstr ""
+
+msgid "Decode Template Args"
 msgstr ""
 
 msgid "Delay"
@@ -197,6 +242,9 @@ msgstr ""
 msgid "Device Name"
 msgstr ""
 
+msgid "Discord Event ID"
+msgstr ""
+
 msgid "Display Footer"
 msgstr ""
 
@@ -212,13 +260,16 @@ msgstr ""
 msgid "Email Header"
 msgstr ""
 
-msgid "Encrypted Password"
+msgid "Embed URL"
 msgstr ""
 
-msgid "Encrypted Salt"
+msgid "Enable Contents"
 msgstr ""
 
 msgid "Entity"
+msgstr ""
+
+msgid "Entity ID"
 msgstr ""
 
 msgid "Event"
@@ -231,6 +282,9 @@ msgid "Expire"
 msgstr ""
 
 msgid "Facility"
+msgstr ""
+
+msgid "Feishu"
 msgstr ""
 
 msgid "Fetch Method"
@@ -254,13 +308,31 @@ msgstr ""
 msgid "Forced Mime Type"
 msgstr ""
 
+msgid "Free-Mobile"
+msgstr ""
+
+msgid "From"
+msgstr ""
+
 msgid "From Email"
 msgstr ""
 
 msgid "From Name"
 msgstr ""
 
+msgid "From Phone ID"
+msgstr ""
+
 msgid "From Phone No"
+msgstr ""
+
+msgid "GET Params"
+msgstr ""
+
+msgid "Gateway"
+msgstr ""
+
+msgid "Gateway ID"
 msgstr ""
 
 msgid "Gnome Notification"
@@ -281,6 +353,12 @@ msgstr ""
 msgid "Icon Type"
 msgstr ""
 
+msgid "Icon URL"
+msgstr ""
+
+msgid "Idempotency-Key"
+msgstr ""
+
 msgid "Identifier"
 msgstr ""
 
@@ -296,6 +374,15 @@ msgstr ""
 msgid "Include Segment"
 msgstr ""
 
+msgid "Integration ID"
+msgstr ""
+
+msgid "Integration Key"
+msgstr ""
+
+msgid "Interpret Emojis"
+msgstr ""
+
 msgid "Is Ad?"
 msgstr ""
 
@@ -308,10 +395,16 @@ msgstr ""
 msgid "Language"
 msgstr ""
 
+msgid "Language Code"
+msgstr ""
+
 msgid "Level"
 msgstr ""
 
 msgid "Local File"
+msgstr ""
+
+msgid "Locale"
 msgstr ""
 
 msgid "Log PID"
@@ -326,7 +419,16 @@ msgstr ""
 msgid "MacOSX Notification"
 msgstr ""
 
+msgid "Markdown Version"
+msgstr ""
+
 msgid "Master Key"
+msgstr ""
+
+msgid "Matrix API Verion"
+msgstr ""
+
+msgid "Media Type"
 msgstr ""
 
 msgid "Memory"
@@ -339,6 +441,9 @@ msgid "Message Mode"
 msgstr ""
 
 msgid "Message Type"
+msgstr ""
+
+msgid "Meta Extras"
 msgstr ""
 
 msgid "Modal"
@@ -379,6 +484,9 @@ msgid ""
 "/usr/local/bin/terminal-notifier is locally accessible."
 msgstr ""
 
+msgid "Open/Click URL"
+msgstr ""
+
 msgid "Organization"
 msgstr ""
 
@@ -386,6 +494,12 @@ msgid "Originating Address"
 msgstr ""
 
 msgid "Overflow Mode"
+msgstr ""
+
+msgid "PGP Encryption"
+msgstr ""
+
+msgid "PGP Public Key Path"
 msgstr ""
 
 msgid "Packages are recommended to improve functionality."
@@ -403,7 +517,13 @@ msgstr ""
 msgid "Payload Extras"
 msgstr ""
 
+msgid "Persistent Storage"
+msgstr ""
+
 msgid "Port"
+msgstr ""
+
+msgid "Postback Data"
 msgstr ""
 
 msgid "Prefix"
@@ -421,7 +541,16 @@ msgstr ""
 msgid "Provider Key"
 msgstr ""
 
+msgid "Pushkey"
+msgstr ""
+
 msgid "QOS"
+msgstr ""
+
+msgid "Query Method"
+msgstr ""
+
+msgid "Recipient Phone Number"
 msgstr ""
 
 msgid "Region"
@@ -439,28 +568,40 @@ msgstr ""
 msgid "Reply To Email"
 msgstr ""
 
+msgid "Resend Delay"
+msgstr ""
+
 msgid "Resubmit Flag"
+msgstr ""
+
+msgid "Retain Messages"
 msgstr ""
 
 msgid "Retry"
 msgstr ""
 
-msgid "Rooms"
-msgstr ""
-
-msgid "Route"
+msgid "Room ID"
 msgstr ""
 
 msgid "Route Group"
 msgstr ""
 
-msgid "Routing Key"
+msgid "SMS Mode"
 msgstr ""
 
 msgid "SMTP Server"
 msgstr ""
 
+msgid "Salt"
+msgstr ""
+
 msgid "Schema"
+msgstr ""
+
+msgid "Secret"
+msgstr ""
+
+msgid "Secret API Key"
 msgstr ""
 
 msgid "Secret Access Key"
@@ -478,16 +619,43 @@ msgstr ""
 msgid "Sender ID"
 msgstr ""
 
+msgid "Sender Name"
+msgstr ""
+
+msgid "Sensitive Attachments"
+msgstr ""
+
+msgid "Server Discovery"
+msgstr ""
+
 msgid "Server Key"
 msgstr ""
 
 msgid "Server Timeout"
 msgstr ""
 
+msgid "Service ID"
+msgstr ""
+
+msgid "Service Password"
+msgstr ""
+
+msgid "Severity"
+msgstr ""
+
+msgid "Short URL"
+msgstr ""
+
 msgid "Show Status"
 msgstr ""
 
+msgid "Signature"
+msgstr ""
+
 msgid "Silent Notification"
+msgstr ""
+
+msgid "Société Française du Radiotéléphone"
 msgstr ""
 
 msgid "Socket Connect Timeout"
@@ -511,7 +679,16 @@ msgstr ""
 msgid "Source Phone No"
 msgstr ""
 
+msgid "Space ID"
+msgstr ""
+
 msgid "Special Text Color"
+msgstr ""
+
+msgid "Splunk On-Call"
+msgstr ""
+
+msgid "Spoiler Text"
 msgstr ""
 
 msgid "Sticky"
@@ -520,7 +697,7 @@ msgstr ""
 msgid "Subtitle"
 msgstr ""
 
-msgid "Syslog Mode"
+msgid "TTS Voice"
 msgstr ""
 
 msgid "Tags"
@@ -544,9 +721,6 @@ msgstr ""
 msgid "Target Device"
 msgstr ""
 
-msgid "Target Device ID"
-msgstr ""
-
 msgid "Target Email"
 msgstr ""
 
@@ -565,6 +739,9 @@ msgstr ""
 msgid "Target Group ID"
 msgstr ""
 
+msgid "Target Phone"
+msgstr ""
+
 msgid "Target Phone No"
 msgstr ""
 
@@ -580,6 +757,9 @@ msgstr ""
 msgid "Target Room ID"
 msgstr ""
 
+msgid "Target Routing Key"
+msgstr ""
+
 msgid "Target Schedule"
 msgstr ""
 
@@ -592,16 +772,19 @@ msgstr ""
 msgid "Target Subreddit"
 msgstr ""
 
-msgid "Target Tag ID"
+msgid "Target Team"
 msgstr ""
 
-msgid "Target Team"
+msgid "Target Threema ID"
 msgstr ""
 
 msgid "Target Topic"
 msgstr ""
 
 msgid "Target User"
+msgstr ""
+
+msgid "Target User ID"
 msgstr ""
 
 msgid "Targets"
@@ -619,6 +802,15 @@ msgstr ""
 msgid "Template Data"
 msgstr ""
 
+msgid "Template ID"
+msgstr ""
+
+msgid "Template Mapping"
+msgstr ""
+
+msgid "Template Name"
+msgstr ""
+
 msgid "Template Path"
 msgstr ""
 
@@ -634,7 +826,16 @@ msgstr ""
 msgid "Text To Speech"
 msgstr ""
 
+msgid "Third Party ID"
+msgstr ""
+
 msgid "Thread ID"
+msgstr ""
+
+msgid "Thread Key"
+msgstr ""
+
+msgid "Timeout"
 msgstr ""
 
 msgid "To Channel ID"
@@ -658,7 +859,13 @@ msgstr ""
 msgid "Token C"
 msgstr ""
 
+msgid "Token D"
+msgstr ""
+
 msgid "Topic"
+msgstr ""
+
+msgid "Topic Thread ID"
 msgstr ""
 
 msgid "Transmitter Groups"
@@ -667,10 +874,16 @@ msgstr ""
 msgid "URL"
 msgstr ""
 
+msgid "URL Prefix"
+msgstr ""
+
 msgid "URL Title"
 msgstr ""
 
 msgid "Unicode Characters"
+msgstr ""
+
+msgid "Upload"
 msgstr ""
 
 msgid "Urgency"
@@ -688,7 +901,7 @@ msgstr ""
 msgid "Use Session"
 msgstr ""
 
-msgid "User ID"
+msgid "User Email"
 msgstr ""
 
 msgid "User Key"
@@ -707,6 +920,12 @@ msgid "Version"
 msgstr ""
 
 msgid "Vibration"
+msgstr ""
+
+msgid "Visibility"
+msgstr ""
+
+msgid "Volume"
 msgstr ""
 
 msgid "Web Based"
@@ -730,7 +949,13 @@ msgstr ""
 msgid "Webhook Token"
 msgstr ""
 
+msgid "Workflow ID"
+msgstr ""
+
 msgid "Workspace"
+msgstr ""
+
+msgid "Wrap Text"
 msgstr ""
 
 msgid "X-Axis"
@@ -743,5 +968,8 @@ msgid "libdbus-1.so.x must be installed."
 msgstr ""
 
 msgid "ttl"
+msgstr ""
+
+msgid "validity"
 msgstr ""
 

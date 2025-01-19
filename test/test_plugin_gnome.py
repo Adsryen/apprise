@@ -1,27 +1,31 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
 import importlib
 import logging
 import sys
@@ -32,7 +36,7 @@ from unittest.mock import Mock, call, ANY
 import pytest
 
 import apprise
-from apprise.plugins.NotifyGnome import GnomeUrgency, NotifyGnome
+from apprise.plugins.gnome import GnomeUrgency, NotifyGnome
 from helpers import reload_plugin
 
 # Disable logging for a cleaner testing output
@@ -55,10 +59,10 @@ def setup_glib_environment():
         # for the purpose of testing and capture the handling of the
         # library when it is missing
         del sys.modules[gi_name]
-        reload_plugin('NotifyGnome')
+        reload_plugin('gnome')
 
     # We need to fake our gnome environment for testing purposes since
-    # the gi library isn't available in Travis CI
+    # the gi library isn't available on CI
     gi = types.ModuleType(gi_name)
     gi.repository = types.ModuleType(gi_name + '.repository')
     gi.module = types.ModuleType(gi_name + '.module')
@@ -93,8 +97,7 @@ def setup_glib_environment():
 
     # When patching something which has a side effect on the module-level code
     # of a plugin, make sure to reload it.
-    current_module = sys.modules[__name__]
-    reload_plugin('NotifyGnome', replace_in=current_module)
+    reload_plugin('gnome')
 
 
 @pytest.fixture
@@ -132,6 +135,9 @@ def test_plugin_gnome_general_success(obj):
 
     # Test url() call
     assert isinstance(obj.url(), str) is True
+
+    # our URL Identifier is disabled
+    assert obj.url_id() is None
 
     # test notifications
     assert obj.notify(title='title', body='body',
@@ -341,8 +347,7 @@ def test_plugin_gnome_gi_croaks():
 
     # When patching something which has a side effect on the module-level code
     # of a plugin, make sure to reload it.
-    current_module = sys.modules[__name__]
-    reload_plugin('NotifyGnome', replace_in=current_module)
+    reload_plugin('gnome')
 
     # Create instance.
     obj = apprise.Apprise.instantiate('gnome://', suppress_exceptions=False)

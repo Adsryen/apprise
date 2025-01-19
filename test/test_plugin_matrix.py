@@ -1,41 +1,65 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 from unittest import mock
-
+import os
 import requests
 import pytest
-from apprise import AppriseAsset
-from json import dumps
+from apprise import (
+    Apprise, AppriseAsset, AppriseAttachment, NotifyType, PersistentStoreMode)
+from json import dumps, loads
 
-from apprise.plugins.NotifyMatrix import NotifyMatrix
+from apprise.plugins.matrix import NotifyMatrix
+from apprise.plugins.matrix import MatrixDiscoveryException
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
 import logging
 logging.disable(logging.CRITICAL)
+
+MATRIX_GOOD_RESPONSE = dumps({
+    'room_id': '!abc123:localhost',
+    'room_alias': '#abc123:localhost',
+    'joined_rooms': ['!abc123:localhost', '!def456:localhost'],
+    'access_token': 'abcd1234',
+    'home_server': 'localhost',
+
+    # Simulate .well-known
+    "m.homeserver": {
+        "base_url": "https://matrix.example.com"
+    },
+    "m.identity_server": {
+        "base_url": "https://vector.im"
+    },
+})
+
+# Attachment Directory
+TEST_VAR_DIR = os.path.join(os.path.dirname(__file__), 'var')
 
 # Our Testing URLs
 apprise_url_tests = (
@@ -89,6 +113,24 @@ apprise_url_tests = (
     ('matrix://user:token@localhost?mode=matrix&format=html', {
         # user and token correctly specified with webhook
         'instance': NotifyMatrix,
+    }),
+    ('matrix://user:token@localhost:123/#general/?version=3', {
+        # Provide version over-ride (using version=)
+        'instance': NotifyMatrix,
+        # Our response expected server response
+        'requests_response_text': MATRIX_GOOD_RESPONSE,
+        'privacy_url': 'matrix://user:****@localhost:123',
+    }),
+    ('matrixs://user:token@localhost/#general?v=2', {
+        # Provide version over-ride (using v=)
+        'instance': NotifyMatrix,
+        # Our response expected server response
+        'requests_response_text': MATRIX_GOOD_RESPONSE,
+        'privacy_url': 'matrixs://user:****@localhost',
+    }),
+    ('matrix://user:token@localhost:123/#general/?v=invalid', {
+        # Invalid version specified
+        'instance': TypeError
     }),
     ('matrix://user:token@localhost?mode=slack&format=text', {
         # user and token correctly specified with webhook
@@ -195,9 +237,10 @@ def test_plugin_matrix_urls():
     AppriseURLTester(tests=apprise_url_tests).run_all()
 
 
+@mock.patch('requests.put')
 @mock.patch('requests.get')
 @mock.patch('requests.post')
-def test_plugin_matrix_general(mock_post, mock_get):
+def test_plugin_matrix_general(mock_post, mock_get, mock_put):
     """
     NotifyMatrix() General Tests
 
@@ -217,57 +260,65 @@ def test_plugin_matrix_general(mock_post, mock_get):
     # Prepare Mock
     mock_get.return_value = request
     mock_post.return_value = request
+    mock_put.return_value = request
 
     # Variation Initializations
     obj = NotifyMatrix(host='host', targets='#abcd')
-    assert isinstance(obj, NotifyMatrix) is True
-    assert isinstance(obj.url(), str) is True
+    assert isinstance(obj, NotifyMatrix)
+    assert isinstance(obj.url(), str)
     # Registration successful
     assert obj.send(body="test") is True
+    del obj
 
     obj = NotifyMatrix(host='host', user='user', targets='#abcd')
-    assert isinstance(obj, NotifyMatrix) is True
-    assert isinstance(obj.url(), str) is True
+    assert isinstance(obj, NotifyMatrix)
+    assert isinstance(obj.url(), str)
     # Registration successful
     assert obj.send(body="test") is True
+    del obj
 
     obj = NotifyMatrix(host='host', password='passwd', targets='#abcd')
-    assert isinstance(obj, NotifyMatrix) is True
-    assert isinstance(obj.url(), str) is True
+    assert isinstance(obj, NotifyMatrix)
+    assert isinstance(obj.url(), str)
     # A username gets automatically generated in these cases
     assert obj.send(body="test") is True
+    del obj
 
     obj = NotifyMatrix(
         host='host', user='user', password='passwd', targets='#abcd')
-    assert isinstance(obj.url(), str) is True
-    assert isinstance(obj, NotifyMatrix) is True
+    assert isinstance(obj.url(), str)
+    assert isinstance(obj, NotifyMatrix)
     # Registration Successful
     assert obj.send(body="test") is True
+    del obj
 
     # Test sending other format types
     kwargs = NotifyMatrix.parse_url(
         'matrix://user:passwd@hostname/#abcd?format=html')
     obj = NotifyMatrix(**kwargs)
-    assert isinstance(obj.url(), str) is True
-    assert isinstance(obj, NotifyMatrix) is True
-    obj.send(body="test") is True
-    obj.send(title="title", body="test") is True
+    assert isinstance(obj.url(), str)
+    assert isinstance(obj, NotifyMatrix)
+    assert obj.send(body="test") is True
+    assert obj.send(title="title", body="test") is True
+    del obj
 
     kwargs = NotifyMatrix.parse_url(
         'matrix://user:passwd@hostname/#abcd/#abcd:localhost?format=markdown')
     obj = NotifyMatrix(**kwargs)
-    assert isinstance(obj.url(), str) is True
-    assert isinstance(obj, NotifyMatrix) is True
-    obj.send(body="test") is True
-    obj.send(title="title", body="test") is True
+    assert isinstance(obj.url(), str)
+    assert isinstance(obj, NotifyMatrix)
+    assert obj.send(body="test") is True
+    assert obj.send(title="title", body="test") is True
+    del obj
 
     kwargs = NotifyMatrix.parse_url(
         'matrix://user:passwd@hostname/#abcd/!abcd:localhost?format=text')
     obj = NotifyMatrix(**kwargs)
-    assert isinstance(obj.url(), str) is True
+    assert isinstance(obj.url(), str)
     assert isinstance(obj, NotifyMatrix) is True
     obj.send(body="test") is True
     obj.send(title="title", body="test") is True
+    del obj
 
     # Test notice type notifications
     kwargs = NotifyMatrix.parse_url(
@@ -275,14 +326,14 @@ def test_plugin_matrix_general(mock_post, mock_get):
     obj = NotifyMatrix(**kwargs)
     assert isinstance(obj.url(), str) is True
     assert isinstance(obj, NotifyMatrix) is True
-    obj.send(body="test") is True
-    obj.send(title="title", body="test") is True
+    assert obj.send(body="test") is True
+    assert obj.send(title="title", body="test") is True
 
     with pytest.raises(TypeError):
         # invalid message type specified
         kwargs = NotifyMatrix.parse_url(
             'matrix://user:passwd@hostname/#abcd?msgtype=invalid')
-        obj = NotifyMatrix(**kwargs)
+        NotifyMatrix(**kwargs)
 
     # Force a failed login
     ro = response_obj.copy()
@@ -292,17 +343,20 @@ def test_plugin_matrix_general(mock_post, mock_get):
 
     # Fails because we couldn't register because of 404 errors
     assert obj.send(body="test") is False
+    del obj
 
     obj = NotifyMatrix(host='host', user='test', targets='#abcd')
     assert isinstance(obj, NotifyMatrix) is True
     # Fails because we still couldn't register
     assert obj.send(user='test', password='passwd', body="test") is False
+    del obj
 
     obj = NotifyMatrix(
         host='host', user='test', password='passwd', targets='#abcd')
     assert isinstance(obj, NotifyMatrix) is True
     # Fails because we still couldn't register
     assert obj.send(body="test") is False
+    del obj
 
     obj = NotifyMatrix(host='host', password='passwd', targets='#abcd')
     # Fails because we still couldn't register
@@ -331,6 +385,7 @@ def test_plugin_matrix_general(mock_post, mock_get):
     # Fall back to original template
     request.content = dumps(response_obj)
     request.status_code = requests.codes.ok
+    del obj
 
     obj = NotifyMatrix(host='host', targets=None)
     assert isinstance(obj, NotifyMatrix) is True
@@ -348,11 +403,13 @@ def test_plugin_matrix_general(mock_post, mock_get):
     # our room list is empty so we'll have retrieved the joined_list
     # as our backup
     assert obj.send(user='test', password='passwd', body="test") is True
+    del obj
 
 
+@mock.patch('requests.put')
 @mock.patch('requests.get')
 @mock.patch('requests.post')
-def test_plugin_matrix_fetch(mock_post, mock_get):
+def test_plugin_matrix_fetch(mock_post, mock_get, mock_put):
     """
     NotifyMatrix() Server Fetch/API Tests
 
@@ -386,6 +443,7 @@ def test_plugin_matrix_fetch(mock_post, mock_get):
 
         return request
 
+    mock_put.side_effect = fetch_failed
     mock_get.side_effect = fetch_failed
     mock_post.side_effect = fetch_failed
 
@@ -394,6 +452,7 @@ def test_plugin_matrix_fetch(mock_post, mock_get):
     assert isinstance(obj, NotifyMatrix) is True
     # We would hve failed to send our image notification
     assert obj.send(user='test', password='passwd', body="test") is False
+    del obj
 
     # Do the same query with no images to fetch
     asset = AppriseAsset(image_path_mask=False, image_url_mask=False)
@@ -402,6 +461,7 @@ def test_plugin_matrix_fetch(mock_post, mock_get):
     assert isinstance(obj, NotifyMatrix) is True
     # We would hve failed to send our notification
     assert obj.send(user='test', password='passwd', body="test") is False
+    del obj
 
     response_obj = {
         # Registration
@@ -416,12 +476,14 @@ def test_plugin_matrix_fetch(mock_post, mock_get):
     # Default configuration
     mock_get.side_effect = None
     mock_post.side_effect = None
+    mock_put.side_effect = None
 
     request = mock.Mock()
     request.status_code = requests.codes.ok
     request.content = dumps(response_obj)
     mock_post.return_value = request
     mock_get.return_value = request
+    mock_put.return_value = request
 
     obj = NotifyMatrix(host='host', include_image=True)
     assert isinstance(obj, NotifyMatrix) is True
@@ -434,6 +496,7 @@ def test_plugin_matrix_fetch(mock_post, mock_get):
     request.content = dumps({
         'retry_after_ms': 1,
     })
+
     code, response = obj._fetch('/retry/apprise/unit/test')
     assert code is False
 
@@ -450,11 +513,13 @@ def test_plugin_matrix_fetch(mock_post, mock_get):
     })
     code, response = obj._fetch('/retry/apprise/unit/test')
     assert code is False
+    del obj
 
 
+@mock.patch('requests.put')
 @mock.patch('requests.get')
 @mock.patch('requests.post')
-def test_plugin_matrix_auth(mock_post, mock_get):
+def test_plugin_matrix_auth(mock_post, mock_get, mock_put):
     """
     NotifyMatrix() Server Authentication
 
@@ -473,6 +538,7 @@ def test_plugin_matrix_auth(mock_post, mock_get):
     request.content = dumps(response_obj)
     mock_post.return_value = request
     mock_get.return_value = request
+    mock_put.return_value = request
 
     obj = NotifyMatrix(host='localhost')
     assert isinstance(obj, NotifyMatrix) is True
@@ -509,6 +575,7 @@ def test_plugin_matrix_auth(mock_post, mock_get):
     # Our registration will fail now
     assert obj._register() is False
     assert obj.access_token is None
+    del obj
 
     # So will login
     obj = NotifyMatrix(host='host', user='user', password='password')
@@ -544,11 +611,13 @@ def test_plugin_matrix_auth(mock_post, mock_get):
     # code in the response, then we return a True
     assert obj._logout() is True
     assert obj.access_token is None
+    del obj
 
 
+@mock.patch('requests.put')
 @mock.patch('requests.get')
 @mock.patch('requests.post')
-def test_plugin_matrix_rooms(mock_post, mock_get):
+def test_plugin_matrix_rooms(mock_post, mock_get, mock_put):
     """
     NotifyMatrix() Room Testing
 
@@ -573,6 +642,7 @@ def test_plugin_matrix_rooms(mock_post, mock_get):
     request.content = dumps(response_obj)
     mock_post.return_value = request
     mock_get.return_value = request
+    mock_put.return_value = request
 
     obj = NotifyMatrix(host='host')
     assert isinstance(obj, NotifyMatrix) is True
@@ -586,50 +656,58 @@ def test_plugin_matrix_rooms(mock_post, mock_get):
 
     assert obj._room_join('!abc123') == response_obj['room_id']
     # Use cache to get same results
-    assert len(obj._room_cache) == 1
+    assert obj.store.get('!abc123') is None
+    # However this is how the cache entry gets stored
+    assert obj.store.get('!abc123:localhost') is not None
+    assert obj.store.get('!abc123:localhost')['id'] == response_obj['room_id']
     assert obj._room_join('!abc123') == response_obj['room_id']
 
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('!abc123:localhost') == response_obj['room_id']
+    assert obj.store.get('!abc123:localhost') is not None
+    assert obj.store.get('!abc123:localhost')['id'] == response_obj['room_id']
     # Use cache to get same results
-    assert len(obj._room_cache) == 1
     assert obj._room_join('!abc123:localhost') == response_obj['room_id']
 
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('abc123') == response_obj['room_id']
     # Use cache to get same results
-    assert len(obj._room_cache) == 1
+    assert obj.store.get('#abc123:localhost') is not None
+    assert obj.store.get('#abc123:localhost')['id'] == response_obj['room_id']
     assert obj._room_join('abc123') == response_obj['room_id']
 
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('abc123:localhost') == response_obj['room_id']
     # Use cache to get same results
-    assert len(obj._room_cache) == 1
+    assert obj.store.get('#abc123:localhost') is not None
+    assert obj.store.get('#abc123:localhost')['id'] == response_obj['room_id']
     assert obj._room_join('abc123:localhost') == response_obj['room_id']
 
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('#abc123:localhost') == response_obj['room_id']
     # Use cache to get same results
-    assert len(obj._room_cache) == 1
+    assert obj.store.get('#abc123:localhost') is not None
+    assert obj.store.get('#abc123:localhost')['id'] == response_obj['room_id']
     assert obj._room_join('#abc123:localhost') == response_obj['room_id']
 
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('%') is None
     assert obj._room_join(None) is None
 
     # 403 response; this will push for a room creation for alias based rooms
     # and these will fail
     request.status_code = 403
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('!abc123') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('!abc123:localhost') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('abc123') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('abc123:localhost') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_join('#abc123:localhost') is None
+    del obj
 
     # Room creation
     request.status_code = requests.codes.ok
@@ -646,24 +724,24 @@ def test_plugin_matrix_rooms(mock_post, mock_get):
     # You can't add room_id's, they must be aliases
     assert obj._room_create('!abc123') is None
     assert obj._room_create('!abc123:localhost') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('abc123') == response_obj['room_id']
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('abc123:localhost') == response_obj['room_id']
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('#abc123:localhost') == response_obj['room_id']
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('%') is None
     assert obj._room_create(None) is None
 
     # 403 response; this will push for a room creation for alias based rooms
     # and these will fail
     request.status_code = 403
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('abc123') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('abc123:localhost') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_create('#abc123:localhost') is None
 
     request.status_code = 403
@@ -671,9 +749,10 @@ def test_plugin_matrix_rooms(mock_post, mock_get):
         u'errcode': u'M_ROOM_IN_USE',
         u'error': u'Room alias already taken',
     })
-    obj._room_cache = {}
+    obj.store.clear()
     # This causes us to look up a channel ID if we get a ROOM_IN_USE response
     assert obj._room_create('#abc123:localhost') is None
+    del obj
 
     # Room detection
     request.status_code = requests.codes.ok
@@ -701,6 +780,7 @@ def test_plugin_matrix_rooms(mock_post, mock_get):
     response = obj._joined_rooms()
     assert isinstance(response, list) is True
     assert len(response) == 0
+    del obj
 
     # Room id lookup
     request.status_code = requests.codes.ok
@@ -717,20 +797,23 @@ def test_plugin_matrix_rooms(mock_post, mock_get):
     # You can't add room_id's, they must be aliases
     assert obj._room_id('!abc123') is None
     assert obj._room_id('!abc123:localhost') is None
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_id('abc123') == response_obj['room_id']
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_id('abc123:localhost') == response_obj['room_id']
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_id('#abc123:localhost') == response_obj['room_id']
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_id('%') is None
     assert obj._room_id(None) is None
 
     # If we can't look the code up, we return None
     request.status_code = 403
-    obj._room_cache = {}
+    obj.store.clear()
     assert obj._room_id('#abc123:localhost') is None
+
+    # Force a object removal (thus a logout call)
+    del obj
 
 
 def test_plugin_matrix_url_parsing():
@@ -753,9 +836,10 @@ def test_plugin_matrix_url_parsing():
     assert '#room3' in result['targets']
 
 
+@mock.patch('requests.put')
 @mock.patch('requests.get')
 @mock.patch('requests.post')
-def test_plugin_matrix_image_errors(mock_post, mock_get):
+def test_plugin_matrix_image_errors(mock_post, mock_get, mock_put):
     """
     NotifyMatrix() Image Error Handling
 
@@ -786,22 +870,27 @@ def test_plugin_matrix_image_errors(mock_post, mock_get):
     # Prepare Mock
     mock_get.side_effect = mock_function_handing
     mock_post.side_effect = mock_function_handing
+    mock_put.side_effect = mock_function_handing
 
-    obj = NotifyMatrix(host='host', include_image=True)
+    obj = NotifyMatrix(host='host', include_image=True, version='2')
     assert isinstance(obj, NotifyMatrix) is True
     assert obj.access_token is None
 
     # Notification was successful, however we could not post image and since
     # we had post errors (of any kind) we still report a failure.
     assert obj.notify('test', 'test') is False
+    del obj
 
-    obj = NotifyMatrix(host='host', include_image=False)
+    obj = NotifyMatrix(host='host', include_image=False, version='2')
     assert isinstance(obj, NotifyMatrix) is True
     assert obj.access_token is None
 
     # We didn't post an image (which was set to fail) and therefore our
     # post was okay
     assert obj.notify('test', 'test') is True
+
+    # Force a object removal (thus a logout call)
+    del obj
 
     def mock_function_handing(url, data, **kwargs):
         """
@@ -823,15 +912,643 @@ def test_plugin_matrix_image_errors(mock_post, mock_get):
 
     # Prepare Mock
     mock_get.side_effect = mock_function_handing
+    mock_put.side_effect = mock_function_handing
     mock_post.side_effect = mock_function_handing
     obj = NotifyMatrix(host='host', include_image=True)
     assert isinstance(obj, NotifyMatrix) is True
     assert obj.access_token is None
 
     assert obj.notify('test', 'test') is True
+    del obj
 
     obj = NotifyMatrix(host='host', include_image=False)
     assert isinstance(obj, NotifyMatrix) is True
     assert obj.access_token is None
 
     assert obj.notify('test', 'test') is True
+
+    # Force a object removal (thus a logout call)
+    del obj
+
+
+@mock.patch('requests.put')
+@mock.patch('requests.get')
+@mock.patch('requests.post')
+def test_plugin_matrix_attachments_api_v3(mock_post, mock_get, mock_put):
+    """
+    NotifyMatrix() Attachment Checks (v3)
+
+    """
+
+    # Prepare a good response
+    response = mock.Mock()
+    response.status_code = requests.codes.ok
+    response.content = MATRIX_GOOD_RESPONSE.encode('utf-8')
+
+    # Prepare a bad response
+    bad_response = mock.Mock()
+    bad_response.status_code = requests.codes.internal_server_error
+
+    # Prepare Mock return object
+    mock_post.return_value = response
+    mock_get.return_value = response
+    mock_put.return_value = response
+
+    # Instantiate our object
+    obj = Apprise.instantiate('matrix://user:pass@localhost/#general?v=3')
+
+    # attach our content
+    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=attach) is True
+
+    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+
+    # Test our call count
+    assert mock_put.call_count == 1
+    assert mock_post.call_count == 2
+    assert mock_post.call_args_list[0][0][0] == \
+        'http://localhost/_matrix/client/v3/login'
+    assert mock_post.call_args_list[1][0][0] == \
+        'http://localhost/_matrix/client/v3/join/%23general%3Alocalhost'
+    assert mock_put.call_args_list[0][0][0] == \
+        'http://localhost/_matrix/client/v3/rooms/%21abc123%3Alocalhost/' \
+        'send/m.room.message/0'
+
+    # Attach an unsupported file type (it's just skipped)
+    attach = AppriseAttachment(
+        os.path.join(TEST_VAR_DIR, 'apprise-archive.zip'))
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=attach) is True
+
+    # An invalid attachment will cause a failure
+    path = os.path.join(TEST_VAR_DIR, '/invalid/path/to/an/invalid/file.jpg')
+    attach = AppriseAttachment(path)
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=path) is False
+
+    # update our attachment to be valid
+    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+
+    mock_post.return_value = None
+    # Throw an exception on the first call to requests.post()
+    for side_effect in (requests.RequestException(), OSError(), bad_response):
+        mock_post.side_effect = [side_effect]
+
+        # We'll never fail because files are not attached
+        assert obj.send(body="test", attach=attach) is True
+
+    # Throw an exception on the second call to requests.post()
+    for side_effect in (requests.RequestException(), OSError(), bad_response):
+        mock_post.side_effect = [response, side_effect]
+
+        # Attachment support does not exist vor v3 at time, so this will
+        # work nicely
+        assert obj.send(body="test", attach=attach) is True
+
+    # handle a bad response
+    mock_post.side_effect = [response, bad_response, response]
+
+    # Attachment support does not exist vor v3 at time, so this will
+    # work nicely
+    assert obj.send(body="test", attach=attach) is True
+
+    # Force a object removal (thus a logout call)
+    del obj
+
+
+@mock.patch('requests.get')
+@mock.patch('requests.post')
+def test_plugin_matrix_discovery_service(mock_post, mock_get):
+    """
+    NotifyMatrix() Discovery Service
+
+    """
+
+    # Prepare a good response
+    response = mock.Mock()
+    response.status_code = requests.codes.ok
+    response.content = MATRIX_GOOD_RESPONSE.encode('utf-8')
+
+    # Prepare a good response
+    bad_response = mock.Mock()
+    bad_response.status_code = requests.codes.unauthorized
+    bad_response.content = MATRIX_GOOD_RESPONSE.encode('utf-8')
+
+    # Prepare Mock return object
+    mock_post.return_value = response
+    mock_get.return_value = response
+
+    # Instantiate our object
+    obj = Apprise.instantiate(
+        'matrixs://user:pass@example.com/#general?v=2&discovery=yes')
+    assert obj.notify('body') is True
+
+    response = mock.Mock()
+    response.status_code = requests.codes.unavailable
+    _resp = loads(MATRIX_GOOD_RESPONSE)
+
+    mock_get.return_value = response
+    mock_post.return_value = response
+    obj = Apprise.instantiate(
+        'matrixs://user:pass@example.com/#general?v=2&discovery=yes')
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    # Invalid host / fallback is to resolve our own host
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    response.status_code = requests.codes.ok
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    # bad data
+    _resp['m.homeserver'] = '!garbage!:303'
+    response.content = dumps(_resp).encode('utf-8')
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    # We fail our discovery and therefore can't send our notification
+    assert obj.notify('hello world') is False
+
+    # bad key
+    _resp['m.homeserver'] = {}
+    response.content = dumps(_resp).encode('utf-8')
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    _resp['m.homeserver'] = {'base_url': 'https://nuxref.com/base'}
+    response.content = dumps(_resp).encode('utf-8')
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+    assert obj.base_url == 'https://nuxref.com/base'
+    assert obj.identity_url == "https://vector.im"
+
+    # Verify cache saved
+    assert NotifyMatrix.discovery_base_key in obj.store
+    assert NotifyMatrix.discovery_identity_key in obj.store
+
+    # Discovery passes so notifications work too
+    assert obj.notify('hello world') is True
+
+    # bad data
+    _resp['m.identity_server'] = '!garbage!:303'
+    response.content = dumps(_resp).encode('utf-8')
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    # no key
+    _resp['m.identity_server'] = {}
+    response.content = dumps(_resp).encode('utf-8')
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    # remove
+    del _resp['m.identity_server']
+    response.content = dumps(_resp).encode('utf-8')
+
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+    assert obj.base_url == 'https://nuxref.com/base'
+    assert obj.identity_url == 'https://nuxref.com/base'
+
+    # restore
+    _resp['m.identity_server'] = {'base_url': '"https://vector.im'}
+    response.content = dumps(_resp).encode('utf-8')
+
+    # Not found is an acceptable response (no exceptions thrown)
+    response.status_code = requests.codes.not_found
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+    assert obj.base_url == 'https://example.com'
+    assert obj.identity_url == 'https://example.com'
+
+    # Verify cache saved
+    assert NotifyMatrix.discovery_base_key in obj.store
+    assert NotifyMatrix.discovery_identity_key in obj.store
+
+    # Discovery passes so notifications work too
+    response.status_code = requests.codes.ok
+    assert obj.notify('hello world') is True
+
+    response.status_code = requests.codes.ok
+    mock_get.return_value = None
+    mock_get.side_effect = (response, bad_response)
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    # Test case where ourIdentity URI fails to do it's check
+    mock_get.side_effect = (response, response, bad_response)
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    with pytest.raises(MatrixDiscoveryException):
+        obj.base_url
+
+    # Verify cache is not saved
+    assert NotifyMatrix.discovery_base_key not in obj.store
+    assert NotifyMatrix.discovery_identity_key not in obj.store
+
+    # Test an empty block response
+    response.status_code = requests.codes.ok
+    response.content = ''
+    mock_get.return_value = response
+    mock_get.side_effect = None
+    mock_post.return_value = response
+    mock_post.side_effect = None
+    obj.store.clear(
+        NotifyMatrix.discovery_base_key, NotifyMatrix.discovery_identity_key)
+
+    assert obj.base_url == 'https://example.com'
+    assert obj.identity_url == 'https://example.com'
+
+    # Verify cache saved
+    assert NotifyMatrix.discovery_base_key in obj.store
+    assert NotifyMatrix.discovery_identity_key in obj.store
+
+    del obj
+
+
+@mock.patch('requests.get')
+@mock.patch('requests.post')
+def test_plugin_matrix_attachments_api_v2(mock_post, mock_get):
+    """
+    NotifyMatrix() Attachment Checks (v2)
+
+    """
+
+    # Prepare a good response
+    response = mock.Mock()
+    response.status_code = requests.codes.ok
+    response.content = MATRIX_GOOD_RESPONSE.encode('utf-8')
+
+    # Prepare a bad response
+    bad_response = mock.Mock()
+    bad_response.status_code = requests.codes.internal_server_error
+
+    # Prepare Mock return object
+    mock_post.return_value = response
+    mock_get.return_value = response
+
+    # Instantiate our object
+    obj = Apprise.instantiate('matrix://user:pass@localhost/#general?v=2')
+
+    # attach our content
+    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=attach) is True
+
+    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+
+    # Attach an unsupported file
+    mock_post.return_value = response
+    mock_get.return_value = response
+    mock_post.side_effect = None
+    mock_get.side_effect = None
+
+    # Force a object removal (thus a logout call)
+    del obj
+
+    # Instantiate our object
+    obj = Apprise.instantiate('matrixs://user:pass@localhost/#general?v=2')
+
+    # Reset our object
+    mock_post.reset_mock()
+    mock_get.reset_mock()
+
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=attach) is True
+
+    # Test our call count
+    assert mock_post.call_count == 5
+    assert mock_post.call_args_list[0][0][0] == \
+        'https://matrix.example.com/_matrix/client/r0/login'
+    assert mock_post.call_args_list[1][0][0] == \
+        'https://matrix.example.com/_matrix/media/r0/upload'
+    assert mock_post.call_args_list[2][0][0] == \
+        'https://matrix.example.com/_matrix/client/r0/' \
+        'join/%23general%3Alocalhost'
+    assert mock_post.call_args_list[3][0][0] == \
+        'https://matrix.example.com/_matrix/client/r0' \
+        '/rooms/%21abc123%3Alocalhost/send/m.room.message'
+    assert mock_post.call_args_list[4][0][0] == \
+        'https://matrix.example.com/_matrix/client/r0/' \
+        'rooms/%21abc123%3Alocalhost/send/m.room.message'
+
+    # Attach an unsupported file type; these are skipped
+    attach = AppriseAttachment(
+        os.path.join(TEST_VAR_DIR, 'apprise-archive.zip'))
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=attach) is True
+
+    # An invalid attachment will cause a failure
+    path = os.path.join(TEST_VAR_DIR, '/invalid/path/to/an/invalid/file.jpg')
+    attach = AppriseAttachment(path)
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO,
+        attach=path) is False
+
+    # update our attachment to be valid
+    attach = AppriseAttachment(os.path.join(TEST_VAR_DIR, 'apprise-test.gif'))
+
+    mock_post.return_value = None
+    mock_get.return_value = None
+
+    # Throw an exception on the first call to requests.post()
+    for side_effect in (requests.RequestException(), OSError(), bad_response):
+        # Reset our value
+        mock_post.reset_mock()
+        mock_get.reset_mock()
+
+        mock_post.side_effect = [side_effect, response]
+        mock_get.side_effect = [side_effect, response]
+
+        assert obj.send(body="test", attach=attach) is False
+
+    # Throw an exception on the second call to requests.post()
+    for side_effect in (requests.RequestException(), OSError(), bad_response):
+        # Reset our value
+        mock_post.reset_mock()
+        mock_get.reset_mock()
+
+        mock_post.side_effect = [response, side_effect, side_effect, response]
+        mock_get.side_effect = [side_effect, side_effect, response]
+
+        # We'll fail now because of our error handling
+        assert obj.send(body="test", attach=attach) is False
+
+    # handle a bad response
+    mock_post.side_effect = \
+        [response, bad_response, response, response, response, response]
+    mock_get.side_effect = \
+        [response, bad_response, response, response, response, response]
+
+    # We'll fail now because of an internal exception
+    assert obj.send(body="test", attach=attach) is False
+
+    # Force a object removal (thus a logout call)
+    del obj
+
+    # Instantiate our object (no discovery required)
+    obj = Apprise.instantiate(
+        'matrixs://user:pass@localhost/#general?v=2&discovery=no&image=y')
+
+    # Reset our object
+    mock_post.reset_mock()
+    mock_get.reset_mock()
+
+    mock_post.return_value = None
+    mock_get.return_value = None
+    mock_post.side_effect = \
+        [response, response, bad_response, response, response, response,
+         response]
+    mock_get.side_effect = \
+        [response, response, bad_response, response, response, response,
+         response]
+
+    # image attachment didn't succeed
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is False
+
+    # Error during image post
+    mock_post.return_value = response
+    mock_get.return_value = response
+    mock_post.side_effect = None
+    mock_get.side_effect = None
+
+    # We'll fail now because of an internal exception
+    assert obj.send(body="test", attach=attach) is True
+
+    # Force __del__() call
+    del obj
+
+
+@mock.patch('requests.put')
+@mock.patch('requests.get')
+@mock.patch('requests.post')
+def test_plugin_matrix_transaction_ids_api_v3_no_cache(
+        mock_post, mock_get, mock_put):
+    """
+    NotifyMatrix() Transaction ID Checks (v3)
+
+    """
+
+    # Prepare a good response
+    response = mock.Mock()
+    response.status_code = requests.codes.ok
+    response.content = MATRIX_GOOD_RESPONSE.encode('utf-8')
+
+    # Prepare a bad response
+    bad_response = mock.Mock()
+    bad_response.status_code = requests.codes.internal_server_error
+
+    # Prepare Mock return object
+    mock_post.return_value = response
+    mock_get.return_value = response
+    mock_put.return_value = response
+
+    # For each element is 1 batch that is ran
+    # the number defined is the number of notifications to send
+    batch = [10, 1, 5]
+
+    for notifications in batch:
+        # Instantiate our object
+        obj = Apprise.instantiate('matrix://user:pass@localhost/#general?v=3')
+
+        # Ensure mode is flush
+        assert obj.store.mode == PersistentStoreMode.MEMORY
+
+        # Performs a login
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO
+        ) is True
+        assert mock_get.call_count == 0
+        assert mock_post.call_count == 2
+        assert mock_post.call_args_list[0][0][0] == \
+            'http://localhost/_matrix/client/v3/login'
+        assert mock_post.call_args_list[1][0][0] == \
+            'http://localhost/_matrix/client/v3/join/%23general%3Alocalhost'
+        assert mock_put.call_count == 1
+        assert mock_put.call_args_list[0][0][0] == \
+            'http://localhost/_matrix/client/v3/rooms/' + \
+            '%21abc123%3Alocalhost/send/m.room.message/0'
+
+        for no, _ in enumerate(range(notifications), start=1):
+            # Clean our slate
+            mock_post.reset_mock()
+            mock_get.reset_mock()
+            mock_put.reset_mock()
+
+            assert obj.notify(
+                body='body', title='title', notify_type=NotifyType.INFO
+            ) is True
+
+            assert mock_get.call_count == 0
+            assert mock_post.call_count == 0
+            assert mock_put.call_count == 1
+            assert mock_put.call_args_list[0][0][0] == \
+                'http://localhost/_matrix/client/v3/rooms/' + \
+                f'%21abc123%3Alocalhost/send/m.room.message/{no}'
+
+        mock_post.reset_mock()
+        mock_get.reset_mock()
+        mock_put.reset_mock()
+
+        # Force a object removal (thus a logout call)
+        del obj
+
+        assert mock_get.call_count == 0
+        assert mock_post.call_count == 1
+        assert mock_post.call_args_list[0][0][0] == \
+            'http://localhost/_matrix/client/v3/logout'
+        mock_post.reset_mock()
+        assert mock_put.call_count == 0
+
+
+@mock.patch('requests.put')
+@mock.patch('requests.get')
+@mock.patch('requests.post')
+def test_plugin_matrix_transaction_ids_api_v3_w_cache(
+        mock_post, mock_get, mock_put, tmpdir):
+    """
+    NotifyMatrix() Transaction ID Checks (v3)
+
+    """
+
+    # Prepare a good response
+    response = mock.Mock()
+    response.status_code = requests.codes.ok
+    response.content = MATRIX_GOOD_RESPONSE.encode('utf-8')
+
+    # Prepare a bad response
+    bad_response = mock.Mock()
+    bad_response.status_code = requests.codes.internal_server_error
+
+    # Prepare Mock return object
+    mock_post.return_value = response
+    mock_get.return_value = response
+    mock_put.return_value = response
+
+    # For each element is 1 batch that is ran
+    # the number defined is the number of notifications to send
+    batch = [10, 1, 5]
+
+    mock_post.reset_mock()
+    mock_get.reset_mock()
+    mock_put.reset_mock()
+
+    asset = AppriseAsset(
+        storage_mode=PersistentStoreMode.FLUSH,
+        storage_path=str(tmpdir),
+    )
+
+    # Message Counter
+    transaction_id = 1
+
+    for no, notifications in enumerate(batch):
+        # Instantiate our object
+        obj = Apprise.instantiate(
+            'matrix://user:pass@localhost/#general?v=3', asset=asset)
+
+        # Ensure mode is flush
+        assert obj.store.mode == PersistentStoreMode.FLUSH
+
+        # Performs a login
+        assert obj.notify(
+            body='body', title='title', notify_type=NotifyType.INFO
+        ) is True
+        assert mock_get.call_count == 0
+        if no == 0:
+            # first entry
+            assert mock_post.call_count == 2
+            assert mock_post.call_args_list[0][0][0] == \
+                'http://localhost/_matrix/client/v3/login'
+            assert mock_post.call_args_list[1][0][0] == \
+                'http://localhost/_matrix/client/v3/' \
+                'join/%23general%3Alocalhost'
+            assert mock_put.call_count == 1
+            assert mock_put.call_args_list[0][0][0] == \
+                'http://localhost/_matrix/client/v3/rooms/' + \
+                '%21abc123%3Alocalhost/send/m.room.message/0'
+
+        for no, _ in enumerate(range(notifications), start=transaction_id):
+            # Clean our slate
+            mock_post.reset_mock()
+            mock_get.reset_mock()
+            mock_put.reset_mock()
+
+            assert obj.notify(
+                body='body', title='title', notify_type=NotifyType.INFO
+            ) is True
+
+            # Increment transaction counter
+            transaction_id += 1
+
+            assert mock_get.call_count == 0
+            assert mock_post.call_count == 0
+            assert mock_put.call_count == 1
+            assert mock_put.call_args_list[0][0][0] == \
+                'http://localhost/_matrix/client/v3/rooms/' + \
+                f'%21abc123%3Alocalhost/send/m.room.message/{no}'
+
+        # Increment transaction counter
+        transaction_id += 1
+
+        mock_post.reset_mock()
+        mock_get.reset_mock()
+        mock_put.reset_mock()
+
+        # Force a object removal
+        # Biggest takeaway is that a logout no longer happens
+        del obj
+
+        assert mock_get.call_count == 0
+        assert mock_post.call_count == 0
+        assert mock_put.call_count == 0

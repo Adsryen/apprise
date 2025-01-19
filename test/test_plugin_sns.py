@@ -1,34 +1,37 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 from unittest import mock
 
 import pytest
 import requests
 from apprise import Apprise
-from apprise.plugins.NotifySNS import NotifySNS
+from apprise.plugins.sns import NotifySNS
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -110,7 +113,7 @@ def test_plugin_sns_edge_cases(mock_post):
     NotifySNS() Edge Cases
 
     """
-
+    target = '+1800555999'
     # Initializes the plugin with a valid access, but invalid access key
     with pytest.raises(TypeError):
         # No access_key_id specified
@@ -118,7 +121,7 @@ def test_plugin_sns_edge_cases(mock_post):
             access_key_id=None,
             secret_access_key=TEST_ACCESS_KEY_SECRET,
             region_name=TEST_REGION,
-            targets='+1800555999',
+            targets=target,
         )
 
     with pytest.raises(TypeError):
@@ -127,7 +130,7 @@ def test_plugin_sns_edge_cases(mock_post):
             access_key_id=TEST_ACCESS_KEY_ID,
             secret_access_key=None,
             region_name=TEST_REGION,
-            targets='+1800555999',
+            targets=target,
         )
 
     with pytest.raises(TypeError):
@@ -136,7 +139,7 @@ def test_plugin_sns_edge_cases(mock_post):
             access_key_id=TEST_ACCESS_KEY_ID,
             secret_access_key=TEST_ACCESS_KEY_SECRET,
             region_name=None,
-            targets='+1800555999',
+            targets=target,
         )
 
     # No recipients
@@ -197,20 +200,22 @@ def test_plugin_sns_url_parsing():
     assert 'secret_access_key' in results
     assert TEST_ACCESS_KEY_SECRET == results['secret_access_key']
 
+    target = '+18001234567'
+    topic = 'MyTopic'
     # Detect recipients
     results = NotifySNS.parse_url('sns://%s/%s/%s/%s/%s/' % (
         TEST_ACCESS_KEY_ID,
         TEST_ACCESS_KEY_SECRET,
         # Uppercase Region won't break anything
         TEST_REGION.upper(),
-        '+18001234567',
-        'MyTopic')
+        target,
+        topic)
     )
 
     # Confirm that our recipients were found
     assert len(results['targets']) == 2
-    assert '+18001234567' in results['targets']
-    assert 'MyTopic' in results['targets']
+    assert target in results['targets']
+    assert topic in results['targets']
     assert 'region_name' in results
     assert TEST_REGION == results['region_name']
     assert 'access_key_id' in results
@@ -371,7 +376,7 @@ def test_plugin_sns_aws_topic_handling(mock_post):
         # Multi-Topic
         'sns://T1JJ3T3L2/A1BRTD4JD/TIiajkdnl/us-east-1/TopicA/TopicB/'
         # Topic-Mix
-        'sns://T1JJ3T3L2/A1BRTD4JD/TIiajkdnlazkce/us-west-2/' \
+        'sns://T1JJ3T3L2/A1BRTD4JD/TIiajkdnlazkce/us-west-2/'
         '12223334444/TopicA'])
 
     # CreateTopic fails

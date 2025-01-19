@@ -1,32 +1,36 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2020 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 from unittest import mock
-
+from apprise import Apprise
+from apprise import NotifyType
 import requests
-from apprise.plugins.NotifyNextcloudTalk import NotifyNextcloudTalk
+from apprise.plugins.nextcloudtalk import NotifyNextcloudTalk
 from helpers import AppriseURLTester
 
 # Disable logging for a cleaner testing output
@@ -35,7 +39,7 @@ logging.disable(logging.CRITICAL)
 
 apprise_url_tests = (
     ##################################
-    # NotifyNextcloud
+    # NotifyNextcloudTalk
     ##################################
     ('nctalk://:@/', {
         'instance': None,
@@ -61,7 +65,10 @@ apprise_url_tests = (
     }),
     ('nctalk://user:pass@localhost', {
         # No roomid specified
-        'instance': TypeError,
+        'instance': NotifyNextcloudTalk,
+        # Since there are no targets specified we expect a False return on
+        # send()
+        'notify_response': False,
     }),
     ('nctalk://user:pass@localhost/roomid1/roomid2', {
         'instance': NotifyNextcloudTalk,
@@ -71,6 +78,10 @@ apprise_url_tests = (
         'privacy_url': 'nctalk://user:****@localhost/roomid1/roomid2',
     }),
     ('nctalk://user:pass@localhost:8080/roomid', {
+        'instance': NotifyNextcloudTalk,
+        'requests_response_code': requests.codes.created,
+    }),
+    ('nctalk://user:pass@localhost:8080/roomid?url_prefix=/prefix', {
         'instance': NotifyNextcloudTalk,
         'requests_response_code': requests.codes.created,
     }),
@@ -112,7 +123,7 @@ apprise_url_tests = (
 
 def test_plugin_nextcloudtalk_urls():
     """
-    NotifyNextcloud() Apprise URLs
+    NotifyNextcloudTalk() Apprise URLs
 
     """
 
@@ -123,7 +134,7 @@ def test_plugin_nextcloudtalk_urls():
 @mock.patch('requests.post')
 def test_plugin_nextcloudtalk_edge_cases(mock_post):
     """
-    NotifyNextcloud() Edge Cases
+    NotifyNextcloudTalk() Edge Cases
 
     """
 
@@ -145,3 +156,45 @@ def test_plugin_nextcloudtalk_edge_cases(mock_post):
     assert obj.send(body="") is True
     assert 'data' in mock_post.call_args_list[0][1]
     assert 'message' in mock_post.call_args_list[0][1]['data']
+
+
+@mock.patch('requests.post')
+def test_plugin_nextcloud_talk_url_prefix(mock_post):
+    """
+    NotifyNextcloudTalk() URL Prefix Testing
+    """
+
+    response = mock.Mock()
+    response.content = ''
+    response.status_code = requests.codes.created
+
+    # Prepare our mock object
+    mock_post.return_value = response
+
+    # instantiate our object (without a batch mode)
+    obj = Apprise.instantiate(
+        'nctalk://user:pass@localhost/admin/?url_prefix=/abcd')
+
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    # Not set to batch, so we send 2 different messages
+    assert mock_post.call_count == 1
+    assert mock_post.call_args_list[0][0][0] == \
+        'http://localhost/abcd/ocs/v2.php/apps/spreed/api/v1/chat/admin'
+
+    mock_post.reset_mock()
+
+    # instantiate our object (without a batch mode)
+    obj = Apprise.instantiate(
+        'nctalk://user:pass@localhost/admin/?'
+        'url_prefix=a/longer/path/abcd/')
+
+    assert obj.notify(
+        body='body', title='title', notify_type=NotifyType.INFO) is True
+
+    # Not set to batch, so we send 2 different messages
+    assert mock_post.call_count == 1
+    assert mock_post.call_args_list[0][0][0] == \
+        'http://localhost/a/longer/path/abcd/' \
+        'ocs/v2.php/apps/spreed/api/v1/chat/admin'

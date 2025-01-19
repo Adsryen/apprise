@@ -1,40 +1,45 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import re
 from unittest import mock
 
+import pytest
+from apprise import exception
 import requests
 import mimetypes
 from os.path import join
 from os.path import dirname
 from os.path import getsize
-from apprise.attachment.AttachHTTP import AttachHTTP
-from apprise import AppriseAttachment
-from apprise.plugins.NotifyBase import NotifyBase
-from apprise.common import NOTIFY_SCHEMA_MAP
+from apprise.attachment.http import AttachHTTP
+from apprise import Apprise, AppriseAttachment
+from apprise import NotificationManager
+from apprise.plugins import NotifyBase
 from apprise.common import ContentLocation
 
 # Disable logging for a cleaner testing output
@@ -42,6 +47,9 @@ import logging
 logging.disable(logging.CRITICAL)
 
 TEST_VAR_DIR = join(dirname(__file__), 'var')
+
+# Grant access to our Notification Manager Singleton
+N_MGR = NotificationManager()
 
 # Some exception handling we'll use
 REQUEST_EXCEPTIONS = (
@@ -80,15 +88,21 @@ def test_attach_http_query_string_dictionary():
 
     """
 
-    # no qsd specified
-    results = AttachHTTP.parse_url('http://localhost')
+    # Set verify off
+    results = AttachHTTP.parse_url('http://localhost?verify=no&rto=9&cto=8')
     assert isinstance(results, dict)
 
     # Create our object
     obj = AttachHTTP(**results)
     assert isinstance(obj, AttachHTTP)
 
-    assert re.search(r'[?&]verify=yes', obj.url())
+    # verify is disabled and therefore set
+    assert re.search(r'[?&]verify=no', obj.url())
+
+    # Our connect timeout flag is set since it differs from the default
+    assert re.search(r'[?&]cto=8', obj.url())
+    # Our read timeout flag is set since it differs from the default
+    assert re.search(r'[?&]rto=9', obj.url())
 
     # Now lets create a URL with a custom Query String entry
 
@@ -100,15 +114,17 @@ def test_attach_http_query_string_dictionary():
     obj = AttachHTTP(**results)
     assert isinstance(obj, AttachHTTP)
 
-    assert re.search(r'[?&]verify=yes', obj.url())
+    # verify is not in the URL as it is implied (default)
+    assert not re.search(r'[?&]verify=yes', obj.url())
 
     # But now test that our custom arguments have also been set
     assert re.search(r'[?&]dl=1', obj.url())
     assert re.search(r'[?&]_var=test', obj.url())
 
 
+@mock.patch('requests.post')
 @mock.patch('requests.get')
-def test_attach_http(mock_get):
+def test_attach_http(mock_get, mock_post):
     """
     API: AttachHTTP() object
 
@@ -128,7 +144,7 @@ def test_attach_http(mock_get):
             return ''
 
     # Store our good notification in our schema map
-    NOTIFY_SCHEMA_MAP['good'] = GoodNotification
+    N_MGR['good'] = GoodNotification
 
     # Temporary path
     path = join(TEST_VAR_DIR, 'apprise-test.gif')
@@ -183,7 +199,7 @@ def test_attach_http(mock_get):
 
     # Test custom url get parameters
     results = AttachHTTP.parse_url(
-        'http://user:pass@localhost/apprise.gif?dl=1&cache=300')
+        'http://user:pass@localhost/apprise.gif?DL=1&cache=300')
     assert isinstance(results, dict)
     attachment = AttachHTTP(**results)
     assert isinstance(attachment.url(), str) is True
@@ -193,11 +209,15 @@ def test_attach_http(mock_get):
     assert attachment
     assert mock_get.call_count == 1
     assert 'params' in mock_get.call_args_list[0][1]
-    assert 'dl' in mock_get.call_args_list[0][1]['params']
+    assert 'DL' in mock_get.call_args_list[0][1]['params']
 
     # Verify that arguments that are reserved for apprise are not
     # passed along
     assert 'cache' not in mock_get.call_args_list[0][1]['params']
+
+    with mock.patch('os.unlink', side_effect=OSError()):
+        # Test invalidation with exception thrown
+        attachment.invalidate()
 
     results = AttachHTTP.parse_url(
         'http://user:pass@localhost/apprise.gif?+key=value&cache=True')
@@ -218,7 +238,7 @@ def test_attach_http(mock_get):
     attachment = AttachHTTP(**results)
     assert isinstance(attachment.url(), str) is True
     # both mime and name over-ridden
-    assert re.search(r'[?&]mime=image%2Fjpeg', attachment.url())
+    assert re.search(r'[?&]mime=image/jpeg', attachment.url())
     assert re.search(r'[?&]name=usethis.jpg', attachment.url())
     # No Content-Disposition; so we use filename from path
     assert attachment.name == 'usethis.jpg'
@@ -416,3 +436,80 @@ def test_attach_http(mock_get):
 
     # Restore value
     AttachHTTP.max_file_size = max_file_size
+
+    # Multi Message Testing
+    mock_get.side_effect = None
+    mock_get.return_value = DummyResponse()
+
+    # Prepare our POST response (from notify call)
+    response = requests.Request()
+    response.status_code = requests.codes.ok
+    response.content = ""
+    mock_post.return_value = response
+
+    mock_get.reset_mock()
+    mock_post.reset_mock()
+    assert mock_get.call_count == 0
+
+    apobj = Apprise()
+    assert apobj.add('form://localhost')
+    assert apobj.add('json://localhost')
+    assert apobj.add('xml://localhost')
+    assert len(apobj) == 3
+    assert apobj.notify(
+        body='one attachment split 3 times',
+        attach="http://localhost/test.gif",
+    ) is True
+
+    # We posted 3 times
+    assert mock_post.call_count == 3
+    # We only fetched once and re-used the same fetch for all posts
+    assert mock_get.call_count == 1
+
+    mock_get.reset_mock()
+    mock_post.reset_mock()
+    apobj = Apprise()
+    for n in range(10):
+        assert apobj.add(f'json://localhost?:entry={n}&method=post')
+        assert apobj.add(f'form://localhost?:entry={n}&method=post')
+        assert apobj.add(f'xml://localhost?:entry={n}&method=post')
+
+    assert apobj.notify(
+        body='one attachment split 30 times',
+        attach="http://localhost/test.gif",
+    ) is True
+
+    # We posted 30 times
+    assert mock_post.call_count == 30
+    # We only fetched once and re-used the same fetch for all posts
+    assert mock_get.call_count == 1
+
+    #
+    # We will test our base64 handling now
+    #
+    mock_get.reset_mock()
+    mock_post.reset_mock()
+
+    AttachHTTP.max_file_size = getsize(path)
+    # Set ourselves a Content-Disposition (providing a filename)
+    dummy_response.headers['Content-Disposition'] = \
+        'attachment; filename="myimage.gif"'
+    results = AttachHTTP.parse_url('http://user@localhost/filename.gif')
+    assert isinstance(results, dict)
+    obj = AttachHTTP(**results)
+
+    # now test our base64 output
+    assert isinstance(obj.base64(), str)
+    # No encoding if we choose
+    assert isinstance(obj.base64(encoding=None), bytes)
+
+    # Error cases:
+    with mock.patch("builtins.open", new_callable=mock.mock_open,
+                    read_data="mocked file content") as mock_file:
+        mock_file.side_effect = FileNotFoundError
+        with pytest.raises(exception.AppriseFileNotFound):
+            obj.base64()
+
+        mock_file.side_effect = OSError
+        with pytest.raises(exception.AppriseDiskIOError):
+            obj.base64()

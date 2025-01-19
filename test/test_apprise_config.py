@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import sys
 import pytest
@@ -32,17 +35,22 @@ from apprise import ContentIncludeMode
 from apprise import Apprise
 from apprise import AppriseConfig
 from apprise import AppriseAsset
-from apprise.config.ConfigBase import ConfigBase
-from apprise.plugins.NotifyBase import NotifyBase
+from apprise.config import ConfigBase
+from apprise.plugins import NotifyBase
+from apprise import NotificationManager
+from apprise import ConfigurationManager
 
-from apprise.common import CONFIG_SCHEMA_MAP
-from apprise.common import NOTIFY_SCHEMA_MAP
-from apprise.config import __load_matrix
-from apprise.config.ConfigFile import ConfigFile
+from apprise.config.file import ConfigFile
 
 # Disable logging for a cleaner testing output
 import logging
 logging.disable(logging.CRITICAL)
+
+# Grant access to our Notification Manager Singleton
+N_MGR = NotificationManager()
+
+# Grant access to our Configuration Manager Singleton
+C_MGR = ConfigurationManager()
 
 
 def test_apprise_config(tmpdir):
@@ -181,7 +189,7 @@ def test_apprise_config(tmpdir):
     assert isinstance(ac[0].url(), str)
 
     # pop an entry from our list
-    assert isinstance(ac.pop(0), ConfigBase) is True
+    assert isinstance(ac.pop(0), ConfigBase)
 
     # Determine we have no more configuration entries loaded
     assert len(ac) == 0
@@ -245,7 +253,7 @@ def test_apprise_multi_config_entries(tmpdir):
             return ''
 
     # Store our good notification in our schema map
-    NOTIFY_SCHEMA_MAP['good'] = GoodNotification
+    N_MGR._schema_map['good'] = GoodNotification
 
     # Create ourselves a config object
     ac = AppriseConfig()
@@ -263,19 +271,13 @@ def test_apprise_multi_config_entries(tmpdir):
     assert ac.add(configs=object()) is False
 
     # Try to pop an element out of range
-    try:
+    with pytest.raises(IndexError):
         ac.server_pop(len(ac.servers()))
-        # We should have thrown an exception here
-        assert False
-
-    except IndexError:
-        # We expect to be here
-        assert True
 
     # Pop our elements
     while len(ac.servers()) > 0:
         assert isinstance(
-            ac.server_pop(len(ac.servers()) - 1), NotifyBase) is True
+            ac.server_pop(len(ac.servers()) - 1), NotifyBase)
 
 
 def test_apprise_add_config():
@@ -465,7 +467,7 @@ def test_apprise_config_instantiate():
             return ConfigBase.parse_url(url, verify_host=False)
 
     # Store our bad configuration in our schema map
-    CONFIG_SCHEMA_MAP['bad'] = BadConfig
+    C_MGR['bad'] = BadConfig
 
     with pytest.raises(TypeError):
         AppriseConfig.instantiate(
@@ -498,7 +500,7 @@ def test_invalid_apprise_config(tmpdir):
             return ConfigBase.parse_url(url, verify_host=False)
 
     # Store our bad configuration in our schema map
-    CONFIG_SCHEMA_MAP['bad'] = BadConfig
+    C_MGR['bad'] = BadConfig
 
     # temporary file to work with
     t = tmpdir.mkdir("apprise-bad-obj").join("invalid")
@@ -563,7 +565,7 @@ def test_apprise_config_with_apprise_obj(tmpdir):
             return ''
 
     # Store our good notification in our schema map
-    NOTIFY_SCHEMA_MAP['good'] = GoodNotification
+    N_MGR._schema_map['good'] = GoodNotification
 
     # Create ourselves a config object
     ac = AppriseConfig(cache=False)
@@ -615,7 +617,7 @@ def test_apprise_config_with_apprise_obj(tmpdir):
 
     # reference index 0 of our list
     ref = a[0]
-    assert isinstance(ref, NotifyBase) is True
+    assert isinstance(ref, NotifyBase)
 
     # Our length is unchanged
     assert len(a) == 5
@@ -624,7 +626,7 @@ def test_apprise_config_with_apprise_obj(tmpdir):
     ref_popped = a.pop(0)
 
     # Verify our response
-    assert isinstance(ref_popped, NotifyBase) is True
+    assert isinstance(ref_popped, NotifyBase)
 
     # Our length drops by 1
     assert len(a) == 4
@@ -634,34 +636,21 @@ def test_apprise_config_with_apprise_obj(tmpdir):
     assert ref == ref_popped
 
     # pop an index out of range
-    try:
+    with pytest.raises(IndexError):
         a.pop(len(a))
-        # We'll thrown an IndexError and not make it this far
-        assert False
-
-    except IndexError:
-        # As expected
-        assert True
 
     # Our length remains unchanged
     assert len(a) == 4
 
     # Reference content out of range
-    try:
+    with pytest.raises(IndexError):
         a[len(a)]
-
-        # We'll thrown an IndexError and not make it this far
-        assert False
-
-    except IndexError:
-        # As expected
-        assert True
 
     # reference index at the end of our list
     ref = a[len(a) - 1]
 
     # Verify our response
-    assert isinstance(ref, NotifyBase) is True
+    assert isinstance(ref, NotifyBase)
 
     # Our length stays the same
     assert len(a) == 4
@@ -670,7 +659,7 @@ def test_apprise_config_with_apprise_obj(tmpdir):
     ref_popped = a.pop(len(a) - 1)
 
     # Verify our response
-    assert isinstance(ref_popped, NotifyBase) is True
+    assert isinstance(ref_popped, NotifyBase)
 
     # Content popped is the same as one referenced by index
     # earlier
@@ -695,13 +684,13 @@ def test_apprise_config_with_apprise_obj(tmpdir):
     ref = a[len(a) - 1]
 
     # Verify our response
-    assert isinstance(ref, NotifyBase) is True
+    assert isinstance(ref, NotifyBase)
 
     # We can pop from the back of the list without a problem too
     ref_popped = a.pop(len(a) - 1)
 
     # Verify our response
-    assert isinstance(ref_popped, NotifyBase) is True
+    assert isinstance(ref_popped, NotifyBase)
 
     # Content popped is the same as one referenced by index
     # earlier
@@ -712,7 +701,7 @@ def test_apprise_config_with_apprise_obj(tmpdir):
 
     # pop our list
     while len(a) > 0:
-        assert isinstance(a.pop(len(a) - 1), NotifyBase) is True
+        assert isinstance(a.pop(len(a) - 1), NotifyBase)
 
 
 def test_recursive_config_inclusion(tmpdir):
@@ -762,9 +751,9 @@ def test_recursive_config_inclusion(tmpdir):
         allow_cross_includes = ContentIncludeMode.NEVER
 
     # store our entries
-    CONFIG_SCHEMA_MAP['never'] = ConfigCrossPostNever
-    CONFIG_SCHEMA_MAP['strict'] = ConfigCrossPostStrict
-    CONFIG_SCHEMA_MAP['always'] = ConfigCrossPostAlways
+    C_MGR['never'] = ConfigCrossPostNever
+    C_MGR['strict'] = ConfigCrossPostStrict
+    C_MGR['always'] = ConfigCrossPostAlways
 
     # Make our new path valid
     suite = tmpdir.mkdir("apprise_config_recursion")
@@ -783,8 +772,8 @@ json://localhost:8080
 include {}""".format(str(cfg01)))
 
     cfg02.write("""
-# syslog entry
-syslog://
+# json entry
+json://localhost:8080
 
 # recursively include ourselves
 include cfg02.cfg""")
@@ -971,11 +960,6 @@ def test_apprise_config_matrix_load():
     apprise.config.ConfigDummy3 = ConfigDummy3
     apprise.config.ConfigDummy4 = ConfigDummy4
 
-    __load_matrix()
-
-    # Call it again so we detect our entries already loaded
-    __load_matrix()
-
 
 def test_configmatrix_dynamic_importing(tmpdir):
     """
@@ -1048,8 +1032,6 @@ class ConfigBugger(ConfigBase):
     def parse_url(url, *args, **kwargs):
         # always parseable
         return ConfigBase.parse_url(url, verify_host=False)""")
-
-    __load_matrix(path=str(base), name=module_name)
 
 
 @mock.patch('os.path.getsize')

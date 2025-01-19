@@ -1,159 +1,60 @@
 # -*- coding: utf-8 -*-
+# BSD 2-Clause License
 #
-# Copyright (C) 2019 Chris Caron <lead2gold@gmail.com>
-# All rights reserved.
+# Apprise - Push Notification Library.
+# Copyright (c) 2025, Chris Caron <lead2gold@gmail.com>
 #
-# This code is licensed under the MIT License.
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files(the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions :
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 
 import os
-import re
 import copy
 
-from os.path import dirname
-from os.path import abspath
-
 # Used for testing
-from . import NotifyEmail as NotifyEmailBase
-
-# NotifyBase object is passed in as a module not class
-from . import NotifyBase
+from .base import NotifyBase
 
 from ..common import NotifyImageSize
 from ..common import NOTIFY_IMAGE_SIZES
 from ..common import NotifyType
 from ..common import NOTIFY_TYPES
-from .. import common
-from ..utils import parse_list
-from ..utils import cwe312_url
-from ..utils import GET_SCHEMA_RE
+from ..utils.cwe312 import cwe312_url
+from ..utils.parse import parse_list, GET_SCHEMA_RE
 from ..logger import logger
-from ..AppriseLocale import gettext_lazy as _
-from ..AppriseLocale import LazyTranslation
+from ..locale import gettext_lazy as _
+from ..locale import LazyTranslation
+from ..manager_plugins import NotificationManager
+
+
+# Grant access to our Notification Manager Singleton
+N_MGR = NotificationManager()
 
 __all__ = [
     # Reference
     'NotifyImageSize', 'NOTIFY_IMAGE_SIZES', 'NotifyType', 'NOTIFY_TYPES',
     'NotifyBase',
 
-    # NotifyEmail Base Module (used for NotifyEmail testing)
-    'NotifyEmailBase',
-
     # Tokenizer
     'url_to_dict',
 ]
-
-
-# Load our Lookup Matrix
-def __load_matrix(path=abspath(dirname(__file__)), name='apprise.plugins'):
-    """
-    Dynamically load our schema map; this allows us to gracefully
-    skip over modules we simply don't have the dependencies for.
-
-    """
-    # Used for the detection of additional Notify Services objects
-    # The .py extension is optional as we support loading directories too
-    module_re = re.compile(r'^(?P<name>Notify[a-z0-9]+)(\.py)?$', re.I)
-
-    for f in os.listdir(path):
-        match = module_re.match(f)
-        if not match:
-            # keep going
-            continue
-
-        # Store our notification/plugin name:
-        plugin_name = match.group('name')
-        try:
-            module = __import__(
-                '{}.{}'.format(name, plugin_name),
-                globals(), locals(),
-                fromlist=[plugin_name])
-
-        except ImportError:
-            # No problem, we can't use this object
-            continue
-
-        if not hasattr(module, plugin_name):
-            # Not a library we can load as it doesn't follow the simple rule
-            # that the class must bear the same name as the notification
-            # file itself.
-            continue
-
-        # Get our plugin
-        plugin = getattr(module, plugin_name)
-        if not hasattr(plugin, 'app_id'):
-            # Filter out non-notification modules
-            continue
-
-        elif plugin_name in common.NOTIFY_MODULE_MAP:
-            # we're already handling this object
-            continue
-
-        # Add our plugin name to our module map
-        common.NOTIFY_MODULE_MAP[plugin_name] = {
-            'plugin': plugin,
-            'module': module,
-        }
-
-        # Add our module name to our __all__
-        __all__.append(plugin_name)
-
-        fn = getattr(plugin, 'schemas', None)
-        schemas = set([]) if not callable(fn) else fn(plugin)
-
-        # map our schema to our plugin
-        for schema in schemas:
-            if schema in common.NOTIFY_SCHEMA_MAP:
-                logger.error(
-                    "Notification schema ({}) mismatch detected - {} to {}"
-                    .format(schema, common.NOTIFY_SCHEMA_MAP[schema], plugin))
-                continue
-
-            # Assign plugin
-            common.NOTIFY_SCHEMA_MAP[schema] = plugin
-
-    return common.NOTIFY_SCHEMA_MAP
-
-
-# Reset our Lookup Matrix
-def __reset_matrix():
-    """
-    Restores the Lookup matrix to it's base setting. This is only used through
-    testing and should not be directly called.
-    """
-
-    # Reset our schema map
-    common.NOTIFY_SCHEMA_MAP.clear()
-
-    # Iterate over our module map so we can clear out our __all__ and globals
-    for plugin_name in common.NOTIFY_MODULE_MAP.keys():
-
-        # Remove element from plugins
-        __all__.remove(plugin_name)
-
-    # Clear out our module map
-    common.NOTIFY_MODULE_MAP.clear()
-
-
-# Dynamically build our schema base
-__load_matrix()
 
 
 def _sanitize_token(tokens, default_delimiter):
@@ -163,6 +64,9 @@ def _sanitize_token(tokens, default_delimiter):
     specified.
 
     """
+
+    # Used for tracking groups
+    group_map = {}
 
     # Iterate over our tokens
     for key in tokens.keys():
@@ -176,18 +80,35 @@ def _sanitize_token(tokens, default_delimiter):
             # Do not touch this field
             continue
 
+        elif 'name' not in tokens[key]:
+            # Default to key
+            tokens[key]['name'] = key
+
         if 'map_to' not in tokens[key]:
             # Default type to key
             tokens[key]['map_to'] = key
+
+        # Track our map_to objects
+        if tokens[key]['map_to'] not in group_map:
+            group_map[tokens[key]['map_to']] = set()
+        group_map[tokens[key]['map_to']].add(key)
 
         if 'type' not in tokens[key]:
             # Default type to string
             tokens[key]['type'] = 'string'
 
-        elif tokens[key]['type'].startswith('list') \
-                and 'delim' not in tokens[key]:
-            # Default list delimiter (if not otherwise specified)
-            tokens[key]['delim'] = default_delimiter
+        elif tokens[key]['type'].startswith('list'):
+            if 'delim' not in tokens[key]:
+                # Default list delimiter (if not otherwise specified)
+                tokens[key]['delim'] = default_delimiter
+
+            if key in group_map[tokens[key]['map_to']]:  # pragma: no branch
+                # Remove ourselves from the list
+                group_map[tokens[key]['map_to']].remove(key)
+
+            # Pointing to the set directly so we can dynamically update
+            # ourselves
+            tokens[key]['group'] = group_map[tokens[key]['map_to']]
 
         elif tokens[key]['type'].startswith('choice') \
                 and 'default' not in tokens[key] \
@@ -264,6 +185,13 @@ def details(plugin):
     #
     #            # Identifies if the entry specified is required or not
     #            'required': True,
+    #
+    #            # Identifies all tokens detected to be associated with the
+    #            # list:string
+    #            # This is ony present in list:string objects and is only set
+    #            # if this element acts as an alias for several other
+    #            # kwargs/fields.
+    #            'group': [],
     #
     #            # Identify a default value
     #            'default': 'http',
@@ -518,16 +446,16 @@ def url_to_dict(url, secure_logging=True):
 
     # Ensure our schema is always in lower case
     schema = schema.group('schema').lower()
-    if schema not in common.NOTIFY_SCHEMA_MAP:
+    if schema not in N_MGR:
         # Give the user the benefit of the doubt that the user may be using
         # one of the URLs provided to them by their notification service.
         # Before we fail for good, just scan all the plugins that support the
         # native_url() parse function
-        results = \
-            next((r['plugin'].parse_native_url(_url)
-                  for r in common.NOTIFY_MODULE_MAP.values()
-                  if r['plugin'].parse_native_url(_url) is not None),
-                 None)
+        results = None
+        for plugin in N_MGR.plugins():
+            results = plugin.parse_native_url(_url)
+            if results:
+                break
 
         if not results:
             logger.error('Unparseable URL {}'.format(loggable_url))
@@ -540,14 +468,14 @@ def url_to_dict(url, secure_logging=True):
     else:
         # Parse our url details of the server object as dictionary
         # containing all of the information parsed from our URL
-        results = common.NOTIFY_SCHEMA_MAP[schema].parse_url(_url)
+        results = N_MGR[schema].parse_url(_url)
         if not results:
             logger.error('Unparseable {} URL {}'.format(
-                common.NOTIFY_SCHEMA_MAP[schema].service_name, loggable_url))
+                N_MGR[schema].service_name, loggable_url))
             return None
 
         logger.trace('{} URL {} unpacked as:{}{}'.format(
-            common.NOTIFY_SCHEMA_MAP[schema].service_name, url,
+            N_MGR[schema].service_name, url,
             os.linesep, os.linesep.join(
                 ['{}="{}"'.format(k, v) for k, v in results.items()])))
 
